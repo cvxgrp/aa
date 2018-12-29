@@ -24,7 +24,7 @@ extern "C" {
 typedef struct ACCEL_WORK AaWork;
 
 AaWork *aa_init(aa_int l, aa_int aa_mem);
-aa_int aa_apply(const aa_float * x, const aa_float * fx, aa_float * sol);
+aa_int aa_apply(const aa_float * x, const aa_float * fx, aa_float * sol, AaWork *a);
 void aa_finish(AaWork *a);
 
 #ifdef __cplusplus

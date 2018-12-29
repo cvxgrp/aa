@@ -1,4 +1,4 @@
-#include "../include/aa.h"
+#include "aa.h"
 
 /* This file uses acceleration to improve the convergence of the ADMM iteration
  * z^+ = \phi(z). At each iteration we need to solve a (small) linear system, we
@@ -34,7 +34,7 @@ struct ACCEL_WORK {
   blas_int *ipiv;
 };
 
-aa_float BLAS(dnrm2)(blas_int *n, aa_float *x, blas_int *incx);
+aa_float BLAS(nrm2)(blas_int *n, aa_float *x, blas_int *incx);
 void BLAS(axpy)(blas_int *n, aa_float *a, const aa_float *x, blas_int *incx,
                 aa_float *y, blas_int *incy);
 void BLAS(gemv)(const char *trans, const blas_int *m, const blas_int *n,
@@ -156,7 +156,7 @@ static aa_int solve(AaWork *a, aa_int len) {
              a->work, &one);
   /* work = M \ S'g, where M = S'Y */
   BLAS(gesv)(&blen, &one, a->M, &bk, a->ipiv, a->work, &blen, &info);
-  if (info < 0 || BLAS(dnrm2)(&bl, a->work, &one) >= MAX_NRM) {
+  if (info < 0 || BLAS(nrm2)(&bl, a->work, &one) >= MAX_NRM) {
     return -1;
   }
   /* sol -= dF * work */
@@ -165,7 +165,7 @@ static aa_int solve(AaWork *a, aa_int len) {
   return (aa_int)info;
 }
 
-aa_int aa_apply(const aa_float *x, const aa_float *f, aa_float * sol, AaWork *a) {
+aa_int aa_apply(const aa_float *x, const aa_float *f, aa_float *sol, AaWork *a) {
   aa_int info;
   memcpy(sol, f, sizeof(aa_float) * a->l);
   if (a->k <= 0) {
