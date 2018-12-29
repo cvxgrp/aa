@@ -1,8 +1,4 @@
-#include "accel.h"
-#include "linalg.h"
-#include "scs.h"
-#include "scs_blas.h"
-#include "util.h"
+#include "../include/aa.h"
 
 /* This file uses acceleration to improve the convergence of the ADMM iteration
  * z^+ = \phi(z). At each iteration we need to solve a (small) linear system, we
@@ -11,292 +7,226 @@
  * other more robust methods if we wanted to.
  */
 
-#define MAX_ACCEL_PARAM_NORM (10.0)
+struct ACCEL_WORK {
+  aa_int k; /* aa memory */
+  aa_int l; /* variable dimension */
+  aa_int iter; /* current iteration */
 
-struct SCS_ACCEL_WORK {
-#ifdef USE_LAPACK
-  scs_float *d_f;
-  scs_float *d_g;
-  scs_float *d_x;
-  scs_float *delta_f;
-  scs_float *delta_x;
-  scs_float *f;
-  scs_float *g;
-  scs_float *x;
-  scs_float *sol;
-  scs_float *scratch;
-  scs_float *mat;
-  scs_float *tmp;
+  aa_float *x; /* x input to map*/
+  aa_float *f; /* f(x) output of map */
+  aa_float *g; /* x - f(x) */
+
+  /* from previous iteration */
+  aa_float *g_prev; /* x - f(x) */
+
+  aa_float *y; /* g - g_prev */
+  aa_float *s; /* x - x_prev */
+
+  aa_float *Y; /* matrix of stacked y values */
+  aa_float *S; /* matrix of stacked s values */
+  aa_float *dF; /* Matrix of stacked f differences */
+  aa_float *M; /* S' * Y */
+
+  aa_float *sol; /* contains solution at the end */
+
+  /* workspace variables */
+  aa_float *work;
   blas_int *ipiv;
-  scs_int k, l;
-#endif
-  scs_float total_accel_time;
 };
 
-#ifdef USE_LAPACK
+aa_float BLAS(dnrm2)(blas_int *n, aa_float *x, blas_int *incx);
+void BLAS(axpy)(blas_int *n, aa_float *a, const aa_float *x, blas_int *incx,
+                aa_float *y, blas_int *incy);
 void BLAS(gemv)(const char *trans, const blas_int *m, const blas_int *n,
-                const scs_float *alpha, const scs_float *a, const blas_int *lda,
-                const scs_float *x, const blas_int *incx, const scs_float *beta,
-                scs_float *y, const blas_int *incy);
-void BLAS(gesv)(blas_int *n, blas_int *nrhs, scs_float *a, blas_int *lda,
-                blas_int *ipiv, scs_float *b, blas_int *ldb, blas_int *info);
+                const aa_float *alpha, const aa_float *a, const blas_int *lda,
+                const aa_float *x, const blas_int *incx, const aa_float *beta,
+                aa_float *y, const blas_int *incy);
+void BLAS(gesv)(blas_int *n, blas_int *nrhs, aa_float *a, blas_int *lda,
+                blas_int *ipiv, aa_float *b, blas_int *ldb, blas_int *info);
 
-static void update_mat(ScsAccelWork *a, scs_int idx) {
-  /* use sol as scratch workspace here */
-  DEBUG_FUNC
-  scs_int i;
-  scs_float *wrk = a->sol;
-  scs_float *d_f = a->d_f;
-  scs_float *d_x = a->d_x;
-  scs_float *delta_x = a->delta_x;
-  scs_float *delta_f = a->delta_f;
-  scs_float *mat = a->mat;
-  scs_int l = a->l;
-  scs_int k = a->k;
-  /* blas vars */
-  blas_int twol = (blas_int)(2 * l);
+static void set_mat(AaWork *a) {
+  blas_int bl = (blas_int)(a->l);
   blas_int one = 1;
   blas_int bk = (blas_int)a->k;
-  scs_float onef = 1.0;
-  scs_float zerof = 0.0;
-
-  scs_float ip = SCS(dot)(delta_x, delta_f, 2 * l);
-  BLAS(gemv)
-  ("Trans", &twol, &bk, &onef, d_x, &twol, delta_f, &one, &zerof, wrk, &one);
-  SCS(add_scaled_array)(&(mat[idx * k]), wrk, k, -1.0);
-  BLAS(gemv)
-  ("Trans", &twol, &bk, &onef, d_f, &twol, delta_x, &one, &zerof, wrk, &one);
-  for (i = 0; i < k; ++i) {
-    mat[i * k + idx] -= wrk[i];
-  }
-  mat[idx * k + idx] += ip;
-  RETURN;
+  aa_float onef = 1.0;
+  aa_float zerof = 0.0;
+  BLAS(gemv)("Trans", &bl, &bk, &onef, a->S, &bl, a->Y, &one, &zerof, a->M, &one);
+  return;
 }
 
-static void update_accel_params(ScsWork *w, scs_int idx) {
-  DEBUG_FUNC
-  scs_float *d_f = w->accel->d_f;
-  scs_float *d_g = w->accel->d_g;
-  scs_float *d_x = w->accel->d_x;
-  scs_float *f = w->accel->f;
-  scs_float *g = w->accel->g;
-  scs_float *x = w->accel->x;
-  scs_float *delta_x = w->accel->delta_x;
-  scs_float *delta_f = w->accel->delta_f;
-  scs_int l = w->accel->l;
+static void update_accel_params(const aa_float *x, const aa_float *f, AaWork * a) {
+  aa_int idx = a->iter % a->k;
+  aa_int l = a->l;
 
-  /* copy g_prev into idx col of d_g */
-  memcpy(&(d_g[idx * 2 * l]), g, sizeof(scs_float) * 2 * l);
+  blas_int one = 1;
+  blas_int bl = (blas_int)l;
+  aa_float neg_onef = -1.0;
 
-  /* copy old col d_f into delta_f */
-  memcpy(delta_f, &(d_f[idx * 2 * l]), sizeof(scs_float) * 2 * l);
-  /* copy old col d_x into delta_x */
-  memcpy(delta_x, &(d_x[idx * 2 * l]), sizeof(scs_float) * 2 * l);
-  /* delta_f -= f_prev */
-  SCS(add_scaled_array)(delta_f, f, 2 * l, -1.0);
-  /* delta_x -= x_prev */
-  SCS(add_scaled_array)(delta_x, x, 2 * l, -1.0);
+  /* g = x */
+  memcpy(a->g, x, sizeof(aa_float) * l);
+  /* s = x */
+  memcpy(a->s, x, sizeof(aa_float) * l);
+  /* g -= f */
+  BLAS(axpy)(&bl, &neg_onef, f, &one, a->g, &one);
+  /* s -= x_prev */
+  BLAS(axpy)(&bl, &neg_onef, a->x, &one, a->s, &one);
 
-  /* g = [u;v] */
-  memcpy(g, w->u, sizeof(scs_float) * l);
-  memcpy(&(g[l]), w->v, sizeof(scs_float) * l);
-  /* x = [u_prev;v_prev] */
-  memcpy(x, w->u_prev, sizeof(scs_float) * l);
-  memcpy(&(x[l]), w->v_prev, sizeof(scs_float) * l);
-  /* calculcate f = g - x */
-  memcpy(f, g, sizeof(scs_float) * 2 * l);
-  SCS(add_scaled_array)(f, x, 2 * l, -1.0);
+  /* g, s correct here */
 
-  /* delta_f += f */
-  SCS(add_scaled_array)(delta_f, f, 2 * l, 1.0);
-  /* delta_x += x */
-  SCS(add_scaled_array)(delta_x, x, 2 * l, 1.0);
+  /* y = g */
+  memcpy(a->y, a->g, sizeof(aa_float) * l);
+  /* y -= g_prev */
+  BLAS(axpy)(&bl, &neg_onef, a->g_prev, &one, a->y, &one);
 
-  /* update mat = d_x'*d_f using delta_x, delta_f */
-  update_mat(w->accel, idx);
+  /* y correct here */
 
-  /* idx col of d_g = g_prev - g */
-  SCS(add_scaled_array)(&(d_g[idx * 2 * l]), g, 2 * l, -1);
-  /* idx col of d_f -= delta_f */
-  SCS(add_scaled_array)(&(d_f[idx * 2 * l]), delta_f, 2 * l, -1);
-  /* idx col of d_x -= delta_x */
-  SCS(add_scaled_array)(&(d_x[idx * 2 * l]), delta_x, 2 * l, -1);
-  RETURN;
+  /* copy y into idx col of Y */
+  memcpy(&(a->Y[idx * l]), a->y, sizeof(aa_float) * l);
+  /* copy s into idx col of S */
+  memcpy(&(a->S[idx * l]), a->s, sizeof(aa_float) * l);
+
+  /* Y, S correct here */
+
+  /* copy f into idx col of dF */
+  memcpy(&(a->dF[idx * l]), f, sizeof(aa_float) * l);
+  /* idx col of dF -= f_prev */
+  BLAS(axpy)(&bl, &neg_onef, a->f, &one, &(a->dF[idx * l]), &one);
+
+  /* dF correct here */
+
+  memcpy(a->f, f, sizeof(aa_float) * l);
+  memcpy(a->x, x, sizeof(aa_float) * l);
+
+  /* x, f correct here */
+
+  /* set M = S'*Y */
+  set_mat(a);
+
+  /* M correct here */
+
+  memcpy(a->g_prev, a->g, sizeof(aa_float) * l);
+  return;
 }
 
-ScsAccelWork *SCS(init_accel)(ScsWork *w) {
-  DEBUG_FUNC
-  ScsAccelWork *a = (ScsAccelWork *)scs_calloc(1, sizeof(ScsAccelWork));
+AaWork *aa_init(aa_int l, aa_int aa_mem) {
+  AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
-    RETURN SCS_NULL;
+    return NULL;
   }
-  a->l = w->m + w->n + 1;
-  /* Use MIN to prevent not full rank matrices */
-  a->k = MIN(w->n, w->stgs->acceleration_lookback);
+  a->iter = 0;
+  a->l = l;
+  a->k = aa_mem;
   if (a->k <= 0) {
-    RETURN a;
+    return a;
   }
-  a->d_f = (scs_float *)scs_calloc(2 * a->l * a->k, sizeof(scs_float));
-  a->d_g = (scs_float *)scs_calloc(2 * a->l * a->k, sizeof(scs_float));
-  a->d_x = (scs_float *)scs_calloc(2 * a->l * a->k, sizeof(scs_float));
-  a->f = (scs_float *)scs_calloc(2 * a->l, sizeof(scs_float));
-  a->g = (scs_float *)scs_calloc(2 * a->l, sizeof(scs_float));
-  a->x = (scs_float *)scs_calloc(2 * a->l, sizeof(scs_float));
-  a->delta_f = (scs_float *)scs_calloc(2 * a->l, sizeof(scs_float));
-  a->delta_x = (scs_float *)scs_calloc(2 * a->l, sizeof(scs_float));
-  a->mat = (scs_float *)scs_calloc(a->k * a->k, sizeof(scs_float));
-  a->tmp = (scs_float *)scs_calloc(a->k * a->k, sizeof(scs_float));
-  a->sol = (scs_float *)scs_malloc(sizeof(scs_float) * 2 * a->l);
-  a->scratch = (scs_float *)scs_malloc(sizeof(scs_float) * a->k);
-  a->ipiv = (blas_int *)scs_malloc(sizeof(blas_int) * a->k);
-  a->total_accel_time = 0.0;
-  if (!a->d_f || !a->d_g || !a->f || !a->g || !a->scratch || !a->sol ||
-      !a->d_x || !a->x || !a->scratch || !a->ipiv || !a->mat) {
-    SCS(free_accel)(a);
-    a = SCS_NULL;
-  }
-  RETURN a;
+
+  a->x = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->f = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->g = (aa_float *)calloc(a->l, sizeof(aa_float));
+
+  a->g_prev = (aa_float *)calloc(a->l, sizeof(aa_float));
+
+  a->y = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->s = (aa_float *)calloc(a->l, sizeof(aa_float));
+
+  a->Y = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
+  a->S = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
+  a->dF = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
+
+  a->M = (aa_float *)calloc(a->k * a->k, sizeof(aa_float));
+  a->sol = (aa_float *)malloc(sizeof(aa_float) * a->l);
+  a->work= (aa_float *)malloc(sizeof(aa_float) * a->k);
+  a->ipiv = (blas_int *)malloc(sizeof(blas_int) * a->k);
+  return a;
 }
 
-static scs_int solve_with_gesv(ScsAccelWork *a, scs_int len) {
-  DEBUG_FUNC
+static aa_int solve(AaWork *a, aa_int len) {
   blas_int info = -1;
-  blas_int twol = (blas_int)(2 * a->l);
+  blas_int bl = (blas_int)(a->l);
   blas_int one = 1;
   blas_int blen = (blas_int)len;
   blas_int bk = (blas_int)a->k;
-  scs_float neg_onef = -1.0;
-  scs_float onef = 1.0;
-  scs_float zerof = 0.0;
-  scs_float *d_x = a->d_x;
-  scs_float *mat = a->mat;
-  scs_float *tmp = a->tmp;
-  /* scratch = dX' f */
-  BLAS(gemv)
-  ("Trans", &twol, &blen, &onef, d_x, &twol, a->f, &one, &zerof, a->scratch,
-   &one);
-  /* copy mat into tmp since matrix is destroyed by gesv */
-  memcpy(tmp, mat, a->k * a->k * sizeof(scs_float));
-  /* scratch = (dX'dF) \ dX' f */
-  BLAS(gesv)(&blen, &one, tmp, &bk, a->ipiv, a->scratch, &blen, &info);
-  /* sol = g */
-  memcpy(a->sol, a->g, sizeof(scs_float) * 2 * a->l);
-  /* sol = sol - dG * scratch */
-  BLAS(gemv)
-  ("NoTrans", &twol, &blen, &neg_onef, a->d_g, &twol, a->scratch, &one, &onef,
-   a->sol, &one);
-  #if EXTRA_VERBOSE > 0
-  scs_printf("norm of alphas %f\n", SCS(norm)(a->scratch, len));
-  #endif
-  if (SCS(norm)(a->scratch, len) >= MAX_ACCEL_PARAM_NORM) {
-    RETURN -999;
+  aa_float neg_onef = -1.0;
+  aa_float onef = 1.0;
+  aa_float zerof = 0.0;
+  /* sol = f */
+  memcpy(a->sol, a->f, sizeof(aa_float) * a->l);
+  /* work = S'g */
+  BLAS(gemv)("Trans", &bl, &blen, &onef, a->S, &bl, a->g, &one, &zerof,
+             a->work, &one);
+  /* work = M \ S'g, where M = S'Y */
+  BLAS(gesv)(&blen, &one, a->M, &bk, a->ipiv, a->work, &blen, &info);
+  if (info < 0 || BLAS(dnrm2)(&bl, a->work, &one) >= MAX_NRM) {
+    return -1;
   }
-  RETURN(scs_int) info;
+  /* sol -= dF * work */
+  BLAS(gemv)("NoTrans", &bl, &blen, &neg_onef, a->dF, &bl, a->work, &one, &onef,
+             a->sol, &one);
+  return (aa_int)info;
 }
 
-scs_int SCS(accelerate)(ScsWork *w, scs_int iter) {
-  DEBUG_FUNC
-  scs_int l = w->accel->l;
-  scs_int k = w->accel->k;
-  scs_int info = -1;
-  SCS(timer) accel_timer;
-  if (k <= 0) {
-    RETURN 0;
+aa_int aa_apply(const aa_float *x, const aa_float *f, aa_float * sol, AaWork *a) {
+  aa_int info;
+  memcpy(sol, f, sizeof(aa_float) * a->l);
+  if (a->k <= 0) {
+    return 0;
   }
-  SCS(tic)(&accel_timer);
-  /* update df, d_g, d_x, f, g, x */
-  update_accel_params(w, iter % k);
-  if (iter == 0) {
-    RETURN 0;
+  update_accel_params(x, f, a);
+  if (a->iter++ == 0) {
+    return 0;
   }
   /* solve linear system, new point stored in sol */
-  info = solve_with_gesv(w->accel, MIN(iter, k));
-  w->accel->total_accel_time += SCS(tocq)(&accel_timer);
+  info = solve(a, MIN(a->iter - 1, a->k));
   /* check that info == 0 and fallback otherwise */
-  if (info != 0) {
-  #if EXTRA_VERBOSE > 0
-    scs_printf(
-        "Call to SCS(accelerate) failed with code %li, falling back to using "
-        "no acceleration\n",
-        (long)info);
-  #endif
-    RETURN 0;
+  if (info == 0) {
+    /* set sol */
+    memcpy(sol, a->sol, sizeof(aa_float) * a->l);
   }
-  /* set [u;v] = sol */
-  memcpy(w->u, w->accel->sol, sizeof(scs_float) * l);
-  memcpy(w->v, &(w->accel->sol[l]), sizeof(scs_float) * l);
-  RETURN info;
+  return info;
 }
 
-void SCS(free_accel)(ScsAccelWork *a) {
-  DEBUG_FUNC
+void aa_finish(AaWork *a) {
   if (a) {
-    if (a->d_f) {
-      scs_free(a->d_f);
-    }
-    if (a->d_g) {
-      scs_free(a->d_g);
-    }
-    if (a->d_x) {
-      scs_free(a->d_x);
+    if (a->x) {
+      free(a->x);
     }
     if (a->f) {
-      scs_free(a->f);
+      free(a->f);
     }
     if (a->g) {
-      scs_free(a->g);
+      free(a->g);
     }
-    if (a->x) {
-      scs_free(a->x);
+    if (a->g_prev) {
+      free(a->g_prev);
     }
-    if (a->delta_f) {
-      scs_free(a->delta_f);
+    if (a->y) {
+      free(a->y);
     }
-    if (a->delta_x) {
-      scs_free(a->delta_x);
+    if (a->s) {
+      free(a->s);
+    }
+    if (a->Y) {
+      free(a->Y);
+    }
+    if (a->S) {
+      free(a->S);
+    }
+    if (a->dF) {
+      free(a->dF);
+    }
+    if (a->M) {
+      free(a->M);
     }
     if (a->sol) {
-      scs_free(a->sol);
+      free(a->sol);
     }
-    if (a->scratch) {
-      scs_free(a->scratch);
-    }
-    if (a->mat) {
-      scs_free(a->mat);
-    }
-    if (a->tmp) {
-      scs_free(a->tmp);
+    if (a->work) {
+      free(a->work);
     }
     if (a->ipiv) {
-      scs_free(a->ipiv);
+      free(a->ipiv);
     }
-    scs_free(a);
+    free(a);
   }
-  RETURN;
-}
-
-#else
-
-ScsAccelWork *SCS(init_accel)(ScsWork *w) {
-  ScsAccelWork *a = (ScsAccelWork *)scs_malloc(sizeof(ScsAccelWork));
-  a->total_accel_time = 0.0;
-  RETURN a;
-}
-
-void SCS(free_accel)(ScsAccelWork *a) {
-  if (a) {
-    scs_free(a);
-  }
-}
-
-scs_int SCS(accelerate)(ScsWork *w, scs_int iter) { RETURN 0; }
-#endif
-
-char *SCS(get_accel_summary)(const ScsInfo *info, ScsAccelWork *a) {
-  DEBUG_FUNC
-  char *str = (char *)scs_malloc(sizeof(char) * 64);
-  sprintf(str, "\tAcceleration: avg step time: %1.2es\n",
-          a->total_accel_time / (info->iter + 1) / 1e3);
-  a->total_accel_time = 0.0;
-  RETURN str;
+  return;
 }

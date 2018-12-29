@@ -1,17 +1,31 @@
-#ifndef ACCEL_H_GUARD
-#define ACCEL_H_GUARD
+#ifndef AA_H_GUARD
+#define AA_H_GUARD
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "glbopts.h"
-#include "scs.h"
+#include <stdlib.h>
+#include <string.h>
+#include "aa_blas.h"
 
-ScsAccelWork *SCS(init_accel)(ScsWork *w);
-void SCS(free_accel)(ScsAccelWork *a);
-scs_int SCS(accelerate)(ScsWork *w, scs_int iter);
-char *SCS(get_accel_summary)(const ScsInfo *info, ScsAccelWork *a);
+#define MAX_NRM (10.0)
+
+#ifndef NULL
+#define NULL ((void *) 0)
+#endif
+
+#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+
+#define aa_float double
+#define aa_int int
+#define blas_int int
+
+typedef struct ACCEL_WORK AaWork;
+
+AaWork *aa_init(aa_int l, aa_int aa_mem);
+aa_int aa_apply(const aa_float * x, const aa_float * fx, aa_float * sol);
+void aa_finish(AaWork *a);
 
 #ifdef __cplusplus
 }
