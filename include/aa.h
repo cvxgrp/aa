@@ -5,18 +5,18 @@
 extern "C" {
 #endif
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include "aa_blas.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define MAX_NRM (10.0)
 
 #ifndef NULL
-#define NULL ((void *) 0)
+#define NULL ((void *)0)
 #endif
 
-#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 #define aa_float double
 #define aa_int int
@@ -25,7 +25,8 @@ extern "C" {
 typedef struct ACCEL_WORK AaWork;
 
 AaWork *aa_init(aa_int l, aa_int aa_mem, aa_int type1);
-aa_int aa_apply(const aa_float * x, const aa_float * fx, aa_float * sol, AaWork *a);
+aa_int aa_apply(const aa_float *x, const aa_float *fx, aa_float *sol,
+                AaWork *a);
 void aa_finish(AaWork *a);
 
 #ifdef __cplusplus

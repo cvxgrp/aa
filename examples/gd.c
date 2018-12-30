@@ -1,8 +1,8 @@
 /* Gradient descent (GD) on convex quadratic */
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include "aa.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define SEED (1)
 #define TYPE1 (1)
@@ -11,7 +11,6 @@
 #define ITERS (1000)
 #define STEPSIZE (0.01)
 #define PRINT (100)
-
 
 aa_float BLAS(nrm2)(aa_int *n, aa_float *x, aa_int *incx);
 void BLAS(axpy)(aa_int *n, aa_float *a, const aa_float *x, aa_int *incx,
@@ -35,28 +34,29 @@ static aa_float rand_float(void) {
  *
  */
 int main(int argc, char **argv) {
-  aa_int i, type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED, one = 1;
+  aa_int i, type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED,
+            one = 1;
   aa_float err, neg_step_size = -STEPSIZE;
   aa_float *x, *xprev, *xt, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
 
   switch (argc) {
-    case 7:
-      iters = atoi(argv[6]);
-    case 6:
-      seed = atoi(argv[5]);
-    case 5:
-      type1 = atoi(argv[4]);
-    case 4:
-      neg_step_size = -atof(argv[3]);
-    case 3:
-      n = atoi(argv[2]);
-    case 2:
-      memory = atoi(argv[1]);
-      break;
-    default:
-      printf("Running default parameters.\n");
-      printf("Usage: 'out/gd memory dimension step_size seed iters'\n");
-      break;
+  case 7:
+    iters = atoi(argv[6]);
+  case 6:
+    seed = atoi(argv[5]);
+  case 5:
+    type1 = atoi(argv[4]);
+  case 4:
+    neg_step_size = -atof(argv[3]);
+  case 3:
+    n = atoi(argv[2]);
+  case 2:
+    memory = atoi(argv[1]);
+    break;
+  default:
+    printf("Running default parameters.\n");
+    printf("Usage: 'out/gd memory dimension step_size seed iters'\n");
+    break;
   }
 
   x = malloc(sizeof(aa_float) * n);
@@ -67,24 +67,26 @@ int main(int argc, char **argv) {
 
   srand(seed);
 
-  for (i=0; i < n; i++) {
+  for (i = 0; i < n; i++) {
     x[i] = rand_float();
   }
-  for (i=0; i < n * n; i++) {
+  for (i = 0; i < n * n; i++) {
     Qhalf[i] = rand_float();
   }
 
-  BLAS(gemm)("Trans", "No", &n, &n, &n, &onef, Qhalf, &n, Qhalf, &n, &zerof, Q, &n);
+  BLAS(gemm)
+  ("Trans", "No", &n, &n, &n, &onef, Qhalf, &n, Qhalf, &n, &zerof, Q, &n);
 
-  for (i=0; i < n; i++) {
+  for (i = 0; i < n; i++) {
     Q[i + i * n] += 1.0;
   }
 
-  AaWork * a = aa_init(n, memory, type1);
-  for (i=0; i < iters; i++) {
+  AaWork *a = aa_init(n, memory, type1);
+  for (i = 0; i < iters; i++) {
     memcpy(xprev, x, sizeof(aa_float) * n);
     /* x = x - step_size * Q * xprev */
-    BLAS(gemv)("No", &n, &n, &neg_step_size, Q, &n, xprev, &one, &onef, x, &one);
+    BLAS(gemv)
+    ("No", &n, &n, &neg_step_size, Q, &n, xprev, &one, &onef, x, &one);
 
     aa_apply(xprev, x, xt, a);
     memcpy(x, xt, sizeof(aa_float) * n);
@@ -102,4 +104,3 @@ int main(int argc, char **argv) {
   free(xt);
   return 0;
 }
-
