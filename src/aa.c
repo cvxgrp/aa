@@ -8,6 +8,7 @@
  */
 
 struct ACCEL_WORK {
+  aa_int type1; /* bool, if true type 1 AA otherwise type 2 */
   aa_int k; /* aa memory */
   aa_int l; /* variable dimension */
   aa_int iter; /* current iteration */
@@ -24,8 +25,8 @@ struct ACCEL_WORK {
 
   aa_float *Y; /* matrix of stacked y values */
   aa_float *S; /* matrix of stacked s values */
-  aa_float *dF; /* Matrix of stacked f differences */
-  aa_float *M; /* S' * Y */
+  aa_float *dF; /* Matrix of stacked f differences = (S-Y) */
+  aa_float *M; /* S'Y */
 
   aa_float *sol; /* contains solution at the end */
 
@@ -43,14 +44,15 @@ void BLAS(gemv)(const char *trans, const blas_int *m, const blas_int *n,
                 aa_float *y, const blas_int *incy);
 void BLAS(gesv)(blas_int *n, blas_int *nrhs, aa_float *a, blas_int *lda,
                 blas_int *ipiv, aa_float *b, blas_int *ldb, blas_int *info);
+void BLAS(gemm)(const char *transa, const char *transb, aa_int *m, aa_int *n,
+                aa_int *k, aa_float *alpha, aa_float *a, aa_int *lda,
+                aa_float *b, aa_int *ldb, aa_float *beta, aa_float *c,
+                aa_int *ldc);
 
 static void set_mat(AaWork *a) {
-  blas_int bl = (blas_int)(a->l);
-  blas_int one = 1;
-  blas_int bk = (blas_int)a->k;
-  aa_float onef = 1.0;
-  aa_float zerof = 0.0;
-  BLAS(gemv)("Trans", &bl, &bk, &onef, a->S, &bl, a->Y, &one, &zerof, a->M, &one);
+  blas_int bl = (blas_int)(a->l), bk = (blas_int)a->k;
+  aa_float onef = 1.0, zerof = 0.0;
+  BLAS(gemm)("Trans", "No", &bk, &bk, &bl, &onef, a->type1 ? a->S : a->Y, &bl, a->Y, &bl, &zerof, a->M, &bk);
   return;
 }
 
@@ -105,14 +107,17 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork * a
   /* M correct here */
 
   memcpy(a->g_prev, a->g, sizeof(aa_float) * l);
+
+  /* g_prev set for next iter here */
   return;
 }
 
-AaWork *aa_init(aa_int l, aa_int aa_mem) {
+AaWork *aa_init(aa_int l, aa_int aa_mem, aa_int type1) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     return NULL;
   }
+  a->type1 = type1;
   a->iter = 0;
   a->l = l;
   a->k = aa_mem;
@@ -134,29 +139,25 @@ AaWork *aa_init(aa_int l, aa_int aa_mem) {
   a->dF = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->k * a->k, sizeof(aa_float));
-  a->sol = (aa_float *)malloc(sizeof(aa_float) * a->l);
-  a->work= (aa_float *)malloc(sizeof(aa_float) * a->k);
-  a->ipiv = (blas_int *)malloc(sizeof(blas_int) * a->k);
+  a->sol = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->work= (aa_float *)calloc(a->k, sizeof(aa_float));
+  a->ipiv = (blas_int *)calloc(a->k, sizeof(blas_int));
   return a;
 }
 
 static aa_int solve(AaWork *a, aa_int len) {
-  blas_int info = -1;
-  blas_int bl = (blas_int)(a->l);
-  blas_int one = 1;
-  blas_int blen = (blas_int)len;
-  blas_int bk = (blas_int)a->k;
-  aa_float neg_onef = -1.0;
-  aa_float onef = 1.0;
-  aa_float zerof = 0.0;
+  blas_int info = -1, bl = (blas_int)(a->l), one = 1, blen = (blas_int)len, bk = (blas_int)a->k;
+  aa_float neg_onef = -1.0, onef = 1.0, zerof = 0.0, nrm;
   /* sol = f */
   memcpy(a->sol, a->f, sizeof(aa_float) * a->l);
-  /* work = S'g */
-  BLAS(gemv)("Trans", &bl, &blen, &onef, a->S, &bl, a->g, &one, &zerof,
+  /* work = S'g or Y'g */
+  BLAS(gemv)("Trans", &bl, &blen, &onef, a->type1 ? a->S : a->Y, &bl, a->g, &one, &zerof,
              a->work, &one);
-  /* work = M \ S'g, where M = S'Y */
+  /* work = M \ work, where M = S'Y  or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &bk, a->ipiv, a->work, &blen, &info);
-  if (info < 0 || BLAS(nrm2)(&bl, a->work, &one) >= MAX_NRM) {
+  nrm = BLAS(nrm2)(&bk, a->work, &one);
+  if (info < 0 || nrm >= MAX_NRM) {
+    printf("Error in AA, iter: %i, info: %i, nrm %.2e\n", a->iter, info, nrm);
     return -1;
   }
   /* sol -= dF * work */
