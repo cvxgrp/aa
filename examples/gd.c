@@ -20,12 +20,12 @@ static aa_float rand_float(void) {
 }
 
 /*
- * out/gd memory dimension step_size seed iters
+ * out/gd memory dimension step_size type1 seed iters
  *
  */
 int main(int argc, char **argv) {
-  aa_int i, type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED,
-            one = 1;
+  aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
+  aa_int i, one = 1;
   aa_float err, neg_step_size = -STEPSIZE;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
 
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
     break;
   default:
     printf("Running default parameters.\n");
-    printf("Usage: 'out/gd memory dimension step_size seed iters'\n");
+    printf("Usage: 'out/gd memory dimension step_size type1 seed iters'\n");
     break;
   }
 

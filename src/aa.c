@@ -10,8 +10,8 @@
 /* contains the necessary parameters to perform aa at each step */
 struct ACCEL_WORK {
   aa_int type1; /* bool, if true type 1 aa otherwise type 2 */
-  aa_int k;     /* aa memory */
-  aa_int l;     /* variable dimension */
+  aa_int mem;   /* aa memory */
+  aa_int dim;   /* variable dimension */
   aa_int iter;  /* current iteration */
 
   aa_float *x; /* x input to map*/
@@ -37,11 +37,11 @@ struct ACCEL_WORK {
 
 /* sets a->M to S'Y or Y'Y depending on type of aa used */
 static void set_m(AaWork *a) {
-  blas_int bl = (blas_int)(a->l), bk = (blas_int)a->k;
+  blas_int bdim = (blas_int)(a->dim), bmem = (blas_int)a->mem;
   aa_float onef = 1.0, zerof = 0.0;
   BLAS(gemm)
-  ("Trans", "No", &bk, &bk, &bl, &onef, a->type1 ? a->S : a->Y, &bl, a->Y, &bl,
-   &zerof, a->M, &bk);
+  ("Trans", "No", &bmem, &bmem, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
+   a->Y, &bdim, &zerof, a->M, &bmem);
   return;
 }
 
@@ -49,46 +49,44 @@ static void set_m(AaWork *a) {
 static void update_accel_params(const aa_float *x, const aa_float *f,
                                 AaWork *a) {
   /* at the start a->x = x_prev and a->f = f_prev */
-  aa_int idx = a->iter % a->k;
-  aa_int l = a->l;
-
+  aa_int idx = a->iter % a->mem;
   blas_int one = 1;
-  blas_int bl = (blas_int)l;
+  blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
 
   /* g = x */
-  memcpy(a->g, x, sizeof(aa_float) * l);
+  memcpy(a->g, x, sizeof(aa_float) * a->dim);
   /* s = x */
-  memcpy(a->s, x, sizeof(aa_float) * l);
+  memcpy(a->s, x, sizeof(aa_float) * a->dim);
   /* d = f */
-  memcpy(a->d, f, sizeof(aa_float) * l);
+  memcpy(a->d, f, sizeof(aa_float) * a->dim);
   /* g -= f */
-  BLAS(axpy)(&bl, &neg_onef, f, &one, a->g, &one);
+  BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g, &one);
   /* s -= x_prev */
-  BLAS(axpy)(&bl, &neg_onef, a->x, &one, a->s, &one);
+  BLAS(axpy)(&bdim, &neg_onef, a->x, &one, a->s, &one);
   /* d -= f_prev */
-  BLAS(axpy)(&bl, &neg_onef, a->f, &one, a->d, &one);
+  BLAS(axpy)(&bdim, &neg_onef, a->f, &one, a->d, &one);
 
   /* g, s, d correct here */
 
   /* y = g */
-  memcpy(a->y, a->g, sizeof(aa_float) * l);
+  memcpy(a->y, a->g, sizeof(aa_float) * a->dim);
   /* y -= g_prev */
-  BLAS(axpy)(&bl, &neg_onef, a->g_prev, &one, a->y, &one);
+  BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, a->y, &one);
 
   /* y correct here */
 
   /* copy y into idx col of Y */
-  memcpy(&(a->Y[idx * l]), a->y, sizeof(aa_float) * l);
+  memcpy(&(a->Y[idx * a->dim]), a->y, sizeof(aa_float) * a->dim);
   /* copy s into idx col of S */
-  memcpy(&(a->S[idx * l]), a->s, sizeof(aa_float) * l);
+  memcpy(&(a->S[idx * a->dim]), a->s, sizeof(aa_float) * a->dim);
   /* copy d into idx col of D */
-  memcpy(&(a->D[idx * l]), a->d, sizeof(aa_float) * l);
+  memcpy(&(a->D[idx * a->dim]), a->d, sizeof(aa_float) * a->dim);
 
   /* Y, S, D correct here */
 
-  memcpy(a->f, f, sizeof(aa_float) * l);
-  memcpy(a->x, x, sizeof(aa_float) * l);
+  memcpy(a->f, f, sizeof(aa_float) * a->dim);
+  memcpy(a->x, x, sizeof(aa_float) * a->dim);
 
   /* x, f correct here */
 
@@ -97,7 +95,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
 
   /* M correct here */
 
-  memcpy(a->g_prev, a->g, sizeof(aa_float) * l);
+  memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
 
   /* g_prev set for next iter here */
   return;
@@ -107,30 +105,31 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
  * at the end f contains the next iterate to be returned
  */
 static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
-  blas_int info = -1, bl = (blas_int)(a->l), one = 1, blen = (blas_int)len,
-           bk = (blas_int)a->k;
+  blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len,
+           bmem = (blas_int)a->mem;
   aa_float neg_onef = -1.0, onef = 1.0, zerof = 0.0, nrm;
   /* work = S'g or Y'g */
   BLAS(gemv)
-  ("Trans", &bl, &blen, &onef, a->type1 ? a->S : a->Y, &bl, a->g, &one, &zerof,
-   a->work, &one);
+  ("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g, &one,
+   &zerof, a->work, &one);
   /* work = M \ work, where M = S'Y or M = Y'Y */
-  BLAS(gesv)(&blen, &one, a->M, &bk, a->ipiv, a->work, &blen, &info);
-  nrm = BLAS(nrm2)(&bk, a->work, &one);
+  BLAS(gesv)(&blen, &one, a->M, &bmem, a->ipiv, a->work, &blen, &info);
+  nrm = BLAS(nrm2)(&bmem, a->work, &one);
   if (info < 0 || nrm >= MAX_AA_NRM) {
     printf("Error in AA, iter: %i, info: %i, norm %.2e\n", a->iter, info, nrm);
     return -1;
   }
   /* if solve was successful then set f -= D * work */
   BLAS(gemv)
-  ("NoTrans", &bl, &blen, &neg_onef, a->D, &bl, a->work, &one, &onef, f, &one);
+  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
+   &one);
   return (aa_int)info;
 }
 
 /*
  * API functions below this line, see aa.h for descriptions.
  */
-AaWork *aa_init(aa_int l, aa_int aa_mem, aa_int type1) {
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -138,34 +137,34 @@ AaWork *aa_init(aa_int l, aa_int aa_mem, aa_int type1) {
   }
   a->type1 = type1;
   a->iter = 0;
-  a->l = l;
-  a->k = aa_mem;
-  if (a->k <= 0) {
+  a->dim = dim;
+  a->mem = mem;
+  if (a->mem <= 0) {
     return a;
   }
 
-  a->x = (aa_float *)calloc(a->l, sizeof(aa_float));
-  a->f = (aa_float *)calloc(a->l, sizeof(aa_float));
-  a->g = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->x = (aa_float *)calloc(a->dim, sizeof(aa_float));
+  a->f = (aa_float *)calloc(a->dim, sizeof(aa_float));
+  a->g = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
-  a->g_prev = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->g_prev = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
-  a->y = (aa_float *)calloc(a->l, sizeof(aa_float));
-  a->s = (aa_float *)calloc(a->l, sizeof(aa_float));
-  a->d = (aa_float *)calloc(a->l, sizeof(aa_float));
+  a->y = (aa_float *)calloc(a->dim, sizeof(aa_float));
+  a->s = (aa_float *)calloc(a->dim, sizeof(aa_float));
+  a->d = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
-  a->Y = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
-  a->S = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
-  a->D = (aa_float *)calloc(a->l * a->k, sizeof(aa_float));
+  a->Y = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
+  a->S = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
+  a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
-  a->M = (aa_float *)calloc(a->k * a->k, sizeof(aa_float));
-  a->work = (aa_float *)calloc(a->k, sizeof(aa_float));
-  a->ipiv = (blas_int *)calloc(a->k, sizeof(blas_int));
+  a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
+  a->work = (aa_float *)calloc(a->mem, sizeof(aa_float));
+  a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
   return a;
 }
 
 aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
-  if (a->k <= 0) {
+  if (a->mem <= 0) {
     return 0;
   }
   update_accel_params(x, f, a);
@@ -173,7 +172,7 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     return 0;
   }
   /* solve linear system, new point overwrites f if successful */
-  return solve(f, a, MIN(a->iter - 1, a->k));
+  return solve(f, a, MIN(a->iter - 1, a->mem));
 }
 
 void aa_finish(AaWork *a) {

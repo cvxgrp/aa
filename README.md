@@ -13,13 +13,13 @@ The C API is as follows:
  *
  * Args:
  *  dim: the dimension of the variable for aa
- *  aa_mem: the memory (number of past iterations used) for aa
+ *  mem: the memory (number of past iterations used) for aa
  *  type1: bool, if True use type 1 aa, otherwise use type 2
  *
  * Reurns:
  *  Pointer to aa workspace
  */
-AaWork *aa_init(aa_int dim, aa_int aa_mem, aa_int type1);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1);
 
 /* Apply Anderson Acceleration.
  *
