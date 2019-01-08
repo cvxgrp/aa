@@ -1,6 +1,49 @@
 #include "aa.h"
 #include "aa_blas.h"
 
+
+#ifdef PROFILING
+
+#define TIME_TIC timer __t; tic(&__t);
+#define TIME_TOC toc(__func__, &__t);
+
+#include <time.h>
+typedef struct timer {
+  struct timespec tic;
+  struct timespec toc;
+} timer;
+
+void tic(timer * t) { clock_gettime(CLOCK_MONOTONIC, &t->tic); }
+
+aa_float tocq(timer * t) {
+  struct timespec temp;
+
+  clock_gettime(CLOCK_MONOTONIC, &t->toc);
+
+  if ((t->toc.tv_nsec - t->tic.tv_nsec) < 0) {
+    temp.tv_sec = t->toc.tv_sec - t->tic.tv_sec - 1;
+    temp.tv_nsec = 1e9 + t->toc.tv_nsec - t->tic.tv_nsec;
+  } else {
+    temp.tv_sec = t->toc.tv_sec - t->tic.tv_sec;
+    temp.tv_nsec = t->toc.tv_nsec - t->tic.tv_nsec;
+  }
+  return (aa_float)temp.tv_sec * 1e3 + (aa_float)temp.tv_nsec / 1e6;
+}
+
+
+aa_float toc(const char *str, timer * t) {
+  aa_float time = tocq(t);
+  printf("%s - time: %8.4f milli-seconds.\n", str, time);
+  return time;
+}
+
+#else
+
+#define TIME_TIC
+#define TIME_TOC
+
+#endif
+
 /* This file uses Anderson acceleration to improve the convergence of
  * a fixed point mapping.
  * At each iteration we need to solve a (small) linear system, we
@@ -37,11 +80,13 @@ struct ACCEL_WORK {
 
 /* sets a->M to S'Y or Y'Y depending on type of aa used */
 static void set_m(AaWork *a) {
+  TIME_TIC
   blas_int bdim = (blas_int)(a->dim), bmem = (blas_int)a->mem;
   aa_float onef = 1.0, zerof = 0.0;
   BLAS(gemm)
   ("Trans", "No", &bmem, &bmem, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
    a->Y, &bdim, &zerof, a->M, &bmem);
+  TIME_TOC
   return;
 }
 
@@ -49,6 +94,7 @@ static void set_m(AaWork *a) {
 static void update_accel_params(const aa_float *x, const aa_float *f,
                                 AaWork *a) {
   /* at the start a->x = x_prev and a->f = f_prev */
+  TIME_TIC
   aa_int idx = a->iter % a->mem;
   blas_int one = 1;
   blas_int bdim = (blas_int)a->dim;
@@ -98,6 +144,8 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
   memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
 
   /* g_prev set for next iter here */
+
+  TIME_TOC
   return;
 }
 
@@ -105,6 +153,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
  * at the end f contains the next iterate to be returned
  */
 static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
+  TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len,
            bmem = (blas_int)a->mem;
   aa_float neg_onef = -1.0, onef = 1.0, zerof = 0.0, nrm;
@@ -123,6 +172,7 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
    &one);
+  TIME_TOC
   return (aa_int)info;
 }
 
@@ -164,6 +214,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1) {
 }
 
 aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
+  TIME_TIC
+  aa_int status;
   if (a->mem <= 0) {
     return 0;
   }
@@ -172,7 +224,9 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     return 0;
   }
   /* solve linear system, new point overwrites f if successful */
-  return solve(f, a, MIN(a->iter - 1, a->mem));
+  status = solve(f, a, MIN(a->iter - 1, a->mem));
+  TIME_TOC
+  return status;
 }
 
 void aa_finish(AaWork *a) {
