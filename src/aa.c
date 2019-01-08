@@ -2,7 +2,7 @@
 #include "aa_blas.h"
 
 
-#ifdef PROFILING
+#if PROFILING > 0
 
 #define TIME_TIC timer __t; tic(&__t);
 #define TIME_TOC toc(__func__, &__t);
