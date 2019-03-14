@@ -1,10 +1,11 @@
 #include "aa.h"
 #include "aa_blas.h"
 
-
 #if PROFILING > 0
 
-#define TIME_TIC timer __t; tic(&__t);
+#define TIME_TIC \
+  timer __t;     \
+  tic(&__t);
 #define TIME_TOC toc(__func__, &__t);
 
 #include <time.h>
@@ -13,9 +14,9 @@ typedef struct timer {
   struct timespec toc;
 } timer;
 
-void tic(timer * t) { clock_gettime(CLOCK_MONOTONIC, &t->tic); }
+void tic(timer *t) { clock_gettime(CLOCK_MONOTONIC, &t->tic); }
 
-aa_float tocq(timer * t) {
+aa_float tocq(timer *t) {
   struct timespec temp;
 
   clock_gettime(CLOCK_MONOTONIC, &t->toc);
@@ -30,8 +31,7 @@ aa_float tocq(timer * t) {
   return (aa_float)temp.tv_sec * 1e3 + (aa_float)temp.tv_nsec / 1e6;
 }
 
-
-aa_float toc(const char *str, timer * t) {
+aa_float toc(const char *str, timer *t) {
   aa_float time = tocq(t);
   printf("%s - time: %8.4f milli-seconds.\n", str, time);
   return time;
@@ -165,7 +165,8 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   BLAS(gesv)(&blen, &one, a->M, &bmem, a->ipiv, a->work, &blen, &info);
   nrm = BLAS(nrm2)(&bmem, a->work, &one);
   if (info < 0 || nrm >= MAX_AA_NRM) {
-    printf("Error in AA, iter: %i, info: %i, norm %.2e\n", a->iter, info, nrm);
+    printf("Error in AA type %i, iter: %i, info: %i, norm %.2e\n",
+           a->type1 ? 1 : 2, (int)a->iter, (int)info, nrm);
     return -1;
   }
   /* if solve was successful then set f -= D * work */
