@@ -9,8 +9,8 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
-#define aa_float double
-#define aa_int int
+typedef double aa_float;
+typedef int aa_int;
 
 typedef struct ACCEL_WORK AaWork;
 
