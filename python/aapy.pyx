@@ -1,7 +1,6 @@
 import numpy as np
 
 cdef extern from "../src/aa.c":
-    # C is include here so that it doesn't need to be compiled externally
     pass
 
 cdef extern from "../include/aa.h":
