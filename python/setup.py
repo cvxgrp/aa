@@ -12,6 +12,7 @@ aa_extension = Extension(
 
 setup(
     name="aa",
+    version='0.0.1',
     ext_modules=cythonize([aa_extension])
 )
 
