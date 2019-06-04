@@ -16,6 +16,8 @@ cdef class AndersonAccelerator(object):
         self._wrk = aa_init(dim, mem, type1)
 
     def apply(self, f, x):
+        f = np.squeeze(f)
+        x = np.squeeze(x)
         if not f.flags['C_CONTIGUOUS']:
             f = np.ascontiguousarray(f) # Makes a contiguous copy of the numpy array.
         if not x.flags['C_CONTIGUOUS']:
