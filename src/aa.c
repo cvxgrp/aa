@@ -166,8 +166,8 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   BLAS(gesv)(&blen, &one, a->M, &bmem, a->ipiv, a->work, &blen, &info);
   nrm = BLAS(nrm2)(&bmem, a->work, &one);
   if (info < 0 || nrm >= MAX_AA_NRM) {
-    printf("Error in AA type %i, iter: %i, info: %i, norm %.2e\n",
-           a->type1 ? 1 : 2, (int)a->iter, (int)info, nrm);
+    /* printf("Error in AA type %i, iter: %i, info: %i, norm %.2e\n", */
+    /*       a->type1 ? 1 : 2, (int)a->iter, (int)info, nrm);         */
     return -1;
   }
   /* if solve was successful then set f -= D * work */
