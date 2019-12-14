@@ -137,7 +137,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
 
   /* x, f correct here */
 
-  /* set M = S'*Y */
+  /* set M = S'Y or Y'Y depending on type of aa used */
   set_m(a);
 
   /* M correct here */
