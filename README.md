@@ -3,7 +3,12 @@ AA
 
 AA (`Anderson Acceleration`)
 
-Code based on our paper: https://web.stanford.edu/~boyd/papers/nonexp_global_aa1.html
+C (with python interface) implementation of the Anderson Acceleration algorithm as described in our paper [Globally Convergent Type-I Anderson Acceleration for Non-Smooth Fixed-Point Iterations](https://web.stanford.edu/~boyd/papers/nonexp_global_aa1.html)
+
+MATLAB code (and the experiments presented in the paper) available [here](https://github.com/cvxgrp/nonexp_global_aa1/): 
+
+----
+Usage:
 
 At the command prompt type `make` to compile the library and the example. The
 example can be run by `out/gd`.
