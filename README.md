@@ -3,6 +3,8 @@ AA
 
 AA (`Anderson Acceleration`)
 
+Code based on our paper: https://web.stanford.edu/~boyd/papers/nonexp_global_aa1.html
+
 At the command prompt type `make` to compile the library and the example. The
 example can be run by `out/gd`.
 
