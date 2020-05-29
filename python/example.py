@@ -16,7 +16,7 @@ step = 0.0005
 
 aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
 
-for i in xrange(1000):
+for i in range(1000):
     x_prev = np.copy(x)
     x -= step * Q.dot(x)
     aa_wrk.apply(x, x_prev)
