@@ -8,7 +8,36 @@ C (with python interface) implementation of the Anderson Acceleration algorithm 
 MATLAB code (and the experiments presented in the paper) available [here](https://github.com/cvxgrp/nonexp_global_aa1/): 
 
 ----
-Usage:
+
+Python
+----
+
+To install the package use:
+```bash
+cd python
+python setup.py install
+```
+
+To initialize the accelerator:
+```python
+aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
+```
+where:
+* `dim` is the integer problem dimension.
+* `mem` is the integer amount of memory (or lookback) you want the algorithm to use, around 10 is a good number for this. 
+* `type1` is a boolean, if `True` uses type-1 AA, otherwise uses type-2 AA.
+
+To use the accelerator:
+```python
+aa_wrk.apply(x, x_prev)
+```
+where:
+* `x` is the numpy array consisting of the current iterate and it will be overwritten with the accelerated iterate.
+* `x_prev` is the numpy array consisting of the previous iterate (the input to the update function).
+
+
+C
+----
 
 At the command prompt type `make` to compile the library and the example. The
 example can be run by `out/gd`.
