@@ -20,6 +20,7 @@ python setup.py install
 
 To initialize the accelerator:
 ```python
+import aa
 aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
 ```
 where:
