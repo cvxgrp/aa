@@ -134,12 +134,13 @@ class AndersonAccelerator:
             rec_safeguard = wrk['rec_safeguard']
 
             ## return the fixed-point mapping result for the first iteration
-            if iter_count == 0:
+            if iter_cnt == 0:
                 x1 = beta_0*x + (1-beta_0)*fp(x) # KM iteration
                 g = x - x1
                 wrk['x_k_1'] = x
                 wrk['g_k_1'] = g
                 wrk['Ubar'] = norm(g)
+                wrk['iter_cnt'] = iter_cnt + 1
                 return x1 
 
             m += 1
@@ -190,14 +191,14 @@ class AndersonAccelerator:
                 Shat_mem = Shat_mem.reshape(1, len(Shat_mem))
 
             ## Powell regularization
-            gamma_k_1 = s_k_1_hat.transpose() @ H_AA(y_k_1, H_vecs1, H_vecs2) / (np.linalg.norm(s_k_1_hat)**2)
-            theta_k_1 = phi(gamma_k_1, theta);
+            gamma_k_1 = s_k_1_hat.transpose() @ self.H_AA(y_k_1, H_vecs1, H_vecs2) / (np.linalg.norm(s_k_1_hat)**2)
+            theta_k_1 = self.phi(gamma_k_1, theta);
             y_k_1_tilde = theta_k_1 * y_k_1 - (1-theta_k_1) * g_k_1
 
             ## Update H_vecs
-            Hytilde = H_AA(y_k_1_tilde, H_vecs1, H_vecs2)
+            Hytilde = self.H_AA(y_k_1_tilde, H_vecs1, H_vecs2)
             hvec1 = s_k_1 - Hytilde
-            hvec2 = H_AAt(s_k_1_hat, H_vecs1, H_vecs2) / (s0hat.transpose() @ Hytilde)
+            hvec2 = self.H_AAt(s_k_1_hat, H_vecs1, H_vecs2) / (s_k_1_hat.transpose() @ Hytilde)
             if len(H_vecs1) > 0:
                 H_vecs1 = np.hstack([H_vecs1, hvec1.reshape(len(hvec1),1)])
             else:
@@ -208,7 +209,7 @@ class AndersonAccelerator:
                 H_vecs2 = np.hstack([H_vecs2, hvec2]).reshape(len(hvec2), 1)
 
             ## AA candidate update
-            x_aa = x - H_AA(g, H_vecs1, H_vecs2)
+            x_aa = x - self.H_AA(g, H_vecs1, H_vecs2)
 
 
             ## Update workspace
@@ -220,8 +221,9 @@ class AndersonAccelerator:
 
             ## safeguard checking 
             # generalize to check every M steps like in a2dr??? 
-            if not safeguard(wrk, safeguard_type):
+            if not self.safeguard(wrk, safeguard_type):
                 # AA candidate rejected
+                #print('iter = {}; AA not pass'.format(iter_cnt))
                 rec_safeguard.append(iter_cnt)
                 wrk['rec_safeguard'] = rec_safeguard
                 wrk['aa'] = False
@@ -230,6 +232,7 @@ class AndersonAccelerator:
                 return x1
             else:
                 # AA candidate to be accepted
+                #print('iter = {}; AA passed!'.format(iter_cnt))
                 wrk['aa'] = True
                 wrk['aa_cnt'] = aa_cnt + 1
                 self._wrk = wrk
