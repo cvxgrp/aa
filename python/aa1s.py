@@ -2,7 +2,7 @@
 Anderson Acceleration Class
 '''
 import numpy as np
-import copy
+from numpy.linalg import norm
 
 class AndersonAccelerator:
 
@@ -17,10 +17,13 @@ class AndersonAccelerator:
             ## load stabilization (hyper-)parameters
             wrk['theta'] = params['theta']
             wrk['tau'] = params['tau']
+            wrk['D'] = params['D']
+            wrk['eps'] = params['eps']
             wrk['beta_0'] = 0.01 # mixing parameter of averaged iteration
+            wrk['Ubar'] = None # store norm of g0
             # storage of previous iterates
             wrk['aa'] = True # whether the previous AA candidate is accepted 
-            wrk['x_aa'] = None # storage of the previous AA candidate (None if accepted)
+            wrk['x_aa'] = None # storage of the previous AA candidate (None if accepted, i.e., aa = True)
             wrk['x_k_1'] = None # storage of x_{k-1} (None for the first iteration)
             wrk['g_k_1'] = None # storage of g_{k-1} (None for the first iteration)
             ## index counts
@@ -32,10 +35,10 @@ class AndersonAccelerator:
             wrk['H_vecs1'] = [] # intermediate quantity for matrix-free AA updates
             wrk['H_vecs2'] = [] # intermediate quantity for matrix-free AA update
             ## result storage
-            wrk['restart'] = [] # restart indices
-            wrk['safeguard'] = [] # safeguard indices
+            wrk['rec_restart'] = [] # restart indices
+            wrk['rec_safeguard'] = [] # safeguard indices
         else:
-            # WIP
+            # WIP: non-convex momentum type1 and type2 
             pass
         self._wrk = wrk
 
@@ -69,22 +72,31 @@ class AndersonAccelerator:
         return thetay
 
 
-    def safeguard(self, f, x, type='residual'):
+    def safeguard(self, wrk, type='residual'):
         ''' safeguard checking
         Input:
-            f: current iterate
-            x: previous iterate (input to the update)
+            wrk: workspace that stores information needed for safeguard checking
         Output:
             flag: accept AA candidate (True) or not (False)
         '''
-        # residual decrease
+        if type == 'residual':
+            # check residual decrease
+            D = wrk['D']
+            Ubar = wrk['Ubar']
+            eps = wrk['eps']
+            g = wrk['g_k_1']
+            aa_cnt = wrk['aa_cnt']
+            if norm(g) <= D * Ubar * (aa_cnt + 1)**(-1-eps):
+                return True
+            else:
+                return False
 
-
-        # objective decrease
-
-        # domain checking
-
-        # additional extensions can be added here ...
+        else:
+            ## additional extensions can be added here ...
+            # objective decrease
+            # domain checking
+            # etc.
+            pass
 
     ## AA main update
     def apply(self, fp, x):
@@ -100,8 +112,9 @@ class AndersonAccelerator:
         wrk = self._wrk 
         ## check type1 or type2
         type1 = wrk['type1']
+        safeguard_type = wrk['safeguard_type']
         if type1:
-            # type1 AA update
+            ## type1 AA update
             dim = wrk['dim']
             mem = wrk['mem']
             theta = wrk['theta']
@@ -117,157 +130,74 @@ class AndersonAccelerator:
             Shat_mem = wrk['Shat_mem']
             H_vecs1 = wrk['H_vecs1'] 
             H_vecs2 = wrk['H_vecs2']
-            restart = wrk['restart'] 
-            safeguard = wrk['safeguard']
+            rec_restart = wrk['rec_restart'] 
+            rec_safeguard = wrk['rec_safeguard']
 
-            # return the fixed-point mapping result for the first iteration
+            ## return the fixed-point mapping result for the first iteration
             if iter_count == 0:
-                x1 = fp(x)
+                x1 = beta_0*x + (1-beta_0)*fp(x) # KM iteration
+                g = x - x1
                 wrk['x_k_1'] = x
-                wrk['g_k_1'] = x - x1
+                wrk['g_k_1'] = g
+                wrk['Ubar'] = norm(g)
                 return x1 
 
             m += 1
+            x1 = beta_0*x + (1-beta_0)*fp(x) # KM iteration
+            g = x - x1
+            wrk['x_k_1'] = x
+            wrk['g_k_1'] = g
+
             if not aa:
-                x_aa = wrk['x_aa']
+                # previous AA candidate not accepted
                 x1_aa = fp(x_aa)
-                s0 = x_aa - 
+                g_aa = x_aa - x1_aa
+                s_k_1 = x_aa - x_k_1
+                y_k_1 = g_aa - g_k_1
             else:
-                x1 = fp(x)
+                # previous AA candidate accepted
+                s_k_1 = x - x_k_1
+                y_k_1 = g - g_k_1
 
-
-            s0 = 
-            if iter_count == 0:
-                x1 = fp(x)
-            else:
-                x1 = x - H_AA(g, H_vecs1, H_vecs2)
-
-            ## check every M steps
-
-            ## calculate successive differences
-            s0 = x1 - x
-
-            x_rec[:, i+1] = x1
-            t_rec[i+1] = time.clock() - t0;
-            s0 = x1 - x0
-            fx0 = fx(x1)
-            g1 = x1 - fx0
-            y0 = g1 - g0
-            x0 = x1
-            g0 = g1
-
-        else:
-            # WIP
-            pass
-
-
-
-    '''
-    Anderson Acceleration Iterations
-    '''
-    def aa1_iter(self, f, x):
-        # param is a dictionary with indices 'itermax', 'mem_size', 
-        # 'print_gap', 'theta', 'tau', 'safeguard_type', 'M' (check every M iterations)
-        beta_0 = 0.01 # biased towards more progressive iterations
-        itermax = param['itermax']
-        print_gap = param['print_gap']
-        n = len(x0)
-        x_rec = np.zeros((n,itermax+1))
-        x_rec[:, 0] = x0
-        t_rec = np.zeros((itermax+1,))
-        rec = dict()
-
-        mem_size = param['mem_size']
-        theta = param['theta']
-        tau = param['tau']
-        fx0 = fx(x0)
-        g0 = x0 - fx0
-        Shat_mem = []
-        H_vecs1 = []
-        H_vecs2 = []
-        count = 0
-        m = 0
-        t0 = time.clock()
-        t_rec[0] = 0
-        rec['restart'] = []
-        rec['safeguard'] = []
-
-        for i in range(itermax):
-            m += 1 # default increase of memory
-            if i % print_gap == 0:
-                print('###iteration = {}, residual norm = {}'.format(i, r_rec[i])
-            if i == 0:
-                x1 = fx0
-            else:
-                x1 = x0 - H_AA(g0, H_vecs1, H_vecs2)
-
-            # update using the AA candidate
-            s0 = 
-
-            # check every M iteration
-
-            ### Safeguard checking
-            if safeguard():
-                # this is the corrected safeguard according to the finished draft
-                count += 1
-            else:
-                rec['safeguard'].append(i)
-                print('In iteration {}, safeguard is used to produce the next iteration {}'.format(i, i+1))
-                x1 = beta_0 * x0 + (1-beta_0) * x1_ipalm #(x0 - g0)
-                u1 = x1[dims[0]:dims[1]]
-                a1 = x1[dims[1]:dims[2]].reshape(n_nodes,n_nodes)
-                b1 = x1[dims[2]:dims[3]][0]
-                objective1_ll = objective(u1, a1, b1)
-                objective1 = objective1_ll - reg * (np.linalg.norm(u1)**2 
-                                                    + np.linalg.norm(a1)**2 + np.linalg.norm(b1)**2) 
-            
-            ### update iteration values
-            x_rec[:, i+1] = x1
-            t_rec[i+1] = time.clock() - t0;
-            s0 = x1 - x0
-            fx0 = fx(x1)
-            g1 = x1 - fx0
-            y0 = g1 - g0
-            x0 = x1
-            g0 = g1
-
-            ### Restart checking
-            if m <= mem_size:
+            ## Restart checking
+            if m <= mem:
                 if len(Shat_mem) > 0: # only do when nonempty memory
-                    s0hat = s0 - ((Shat_mem @ s0).transpose() @ Shat_mem).transpose()
+                    s_k_1_hat = s_k_1 - ((Shat_mem @ s_k_1).transpose() @ Shat_mem).transpose()
                 else:
-                    s0hat = s0
+                    s_k_1_hat = s_k_1
                 ### restart if not strongly independent
-                if np.linalg.norm(s0hat) < tau * np.linalg.norm(s0):
-                    rec['restart'].append(i)
-                    s0hat = s0
+                if np.linalg.norm(s_k_1_hat) < tau * np.linalg.norm(s_k_1):
+                    rec_restart.append(iter_cnt)
+                    wrk['rec_restart'] = rec_restart
+                    s_k_1_hat = s_k_1
                     m = 1
                     Shat_mem = []
                     H_vecs1 = []
                     H_vecs2 = []
 
-            else: # memory exceeds
-                s0hat = s0
+            else: 
+                # memory exceeds
+                s_k_1_hat = s_k_1
                 m = 1
                 Shat_mem = []
                 H_vecs1 = []
                 H_vecs2 = []
 
             if len(Shat_mem) > 0:
-                Shat_mem = np.vstack([Shat_mem, s0hat.transpose() / np.linalg.norm(s0hat)])
+                Shat_mem = np.vstack([Shat_mem, s_k_1_hat.transpose() / np.linalg.norm(s_k_1_hat)])
             else:
-                Shat_mem = s0hat.transpose() / np.linalg.norm(s0hat)
+                Shat_mem = s_k_1_hat.transpose() / np.linalg.norm(s_k_1_hat)
                 Shat_mem = Shat_mem.reshape(1, len(Shat_mem))
 
-            ### Powell regularization
-            gamma0 = s0hat.transpose() @ H_AA(y0, H_vecs1, H_vecs2) / (np.linalg.norm(s0hat)**2)
-            theta0 = phi(gamma0, theta);
-            y0tilde = theta0 * y0 - (1-theta0) * g0
+            ## Powell regularization
+            gamma_k_1 = s_k_1_hat.transpose() @ H_AA(y_k_1, H_vecs1, H_vecs2) / (np.linalg.norm(s_k_1_hat)**2)
+            theta_k_1 = phi(gamma_k_1, theta);
+            y_k_1_tilde = theta_k_1 * y_k_1 - (1-theta_k_1) * g_k_1
 
-            ### Update H_vecs
-            Hytilde = H_AA(y0tilde, H_vecs1, H_vecs2)
-            hvec1 = s0 - Hytilde
-            hvec2 = H_AAt(s0hat, H_vecs1, H_vecs2) / (s0hat.transpose() @ Hytilde)
+            ## Update H_vecs
+            Hytilde = H_AA(y_k_1_tilde, H_vecs1, H_vecs2)
+            hvec1 = s_k_1 - Hytilde
+            hvec2 = H_AAt(s_k_1_hat, H_vecs1, H_vecs2) / (s0hat.transpose() @ Hytilde)
             if len(H_vecs1) > 0:
                 H_vecs1 = np.hstack([H_vecs1, hvec1.reshape(len(hvec1),1)])
             else:
@@ -276,5 +206,35 @@ class AndersonAccelerator:
                 H_vecs2 = np.hstack([H_vecs2, hvec2.reshape(len(hvec2),1)])
             else:
                 H_vecs2 = np.hstack([H_vecs2, hvec2]).reshape(len(hvec2), 1)
-                
-        return x_rec, r_rec, t_rec, rec
+
+            ## AA candidate update
+            x_aa = x - H_AA(g, H_vecs1, H_vecs2)
+
+
+            ## Update workspace
+            wrk['iter_cnt'] = iter_cnt + 1
+            wrk['m'] = m
+            wrk['Shat_mem'] = Shat_mem
+            wrk['H_vecs1'] = H_vecs1
+            wrk['H_vecs2'] = H_vecs2
+
+            ## safeguard checking 
+            # generalize to check every M steps like in a2dr??? 
+            if not safeguard(wrk, safeguard_type):
+                # AA candidate rejected
+                rec_safeguard.append(iter_cnt)
+                wrk['rec_safeguard'] = rec_safeguard
+                wrk['aa'] = False
+                wrk['x_aa'] = x_aa
+                self._wrk = wrk
+                return x1
+            else:
+                # AA candidate to be accepted
+                wrk['aa'] = True
+                wrk['aa_cnt'] = aa_cnt + 1
+                self._wrk = wrk
+                return x_aa
+
+        else:
+            # WIP: non-convex momentum type1 and type2 
+            pass
