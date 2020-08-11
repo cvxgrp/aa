@@ -173,7 +173,7 @@ class AndersonAccelerator:
                     s_k_1_hat = s_k_1
                 ### restart if not strongly independent
                 if np.linalg.norm(s_k_1_hat) < tau * np.linalg.norm(s_k_1):
-                    print('restarted!!!')
+                    #print('restarted!!!')
                     rec_restart.append(iter_cnt)
                     wrk['rec_restart'] = rec_restart
                     s_k_1_hat = s_k_1
@@ -184,7 +184,7 @@ class AndersonAccelerator:
 
             else: 
                 # memory exceeds
-                print('memory exceeds')
+                #print('memory exceeds')
                 s_k_1_hat = s_k_1
                 m = 1
                 Shat_mem = []
@@ -236,7 +236,7 @@ class AndersonAccelerator:
             if not self.safeguard(wrk, safeguard_type):
                 # AA candidate rejected
                 #print('iter = {}; AA not pass'.format(iter_cnt))
-                print('safeguarded!!!')
+                #print('safeguarded!!!')
                 rec_safeguard.append(iter_cnt)
                 wrk['rec_safeguard'] = rec_safeguard
                 wrk['aa'] = False
