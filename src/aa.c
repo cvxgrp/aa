@@ -249,28 +249,30 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     return 0;
   }
   update_accel_params(x, f, a);
-  if (a->iter++ == 0) {
-    return 0;
-  }
 
   /* debug */
-  printf("s0 = [");
-  int imax = 2;
+  printf("S0 = [");
+  int imax = 4;
   int i;
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->S[i]);
   }
   printf("];\n");
-  printf("y0 = [");
+  printf("Y0 = [");
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->Y[i]);
   }
   printf("];\n");
+  imax = 2;
   printf("g1 = [");
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->g[i]);
   }
   printf("];\n");
+
+  if (a->iter++ == 0) {
+    return 0;
+  }
 
   /* solve linear system, new point overwrites f if successful */
   status = solve(f, a, MIN(a->iter - 1, a->mem));
