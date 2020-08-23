@@ -99,6 +99,7 @@ class AndersonAccelerator:
             pass
 
     ## AA main update
+    ## chunk it up???
     def apply(self, fp, x):
         ''' AA main update
         Input: 
@@ -128,8 +129,8 @@ class AndersonAccelerator:
             m = wrk['m']
             aa_cnt = wrk['aa_cnt']
             Shat_mem = wrk['Shat_mem']
-            H_vecs1 = wrk['H_vecs1'] 
-            H_vecs2 = wrk['H_vecs2']
+            H_vecs1 = wrk['H_vecs1'] # add comments
+            H_vecs2 = wrk['H_vecs2'] # add comments
             rec_restart = wrk['rec_restart'] 
             rec_safeguard = wrk['rec_safeguard']
 

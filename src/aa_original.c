@@ -162,16 +162,6 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   BLAS(gemv)
   ("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g, &one,
    &zerof, a->work, &one);
-  
-  /* debug */
-  printf("Sg = ");
-  int imax = 1;
-  int i;
-  for (i=0;i < imax;i++) {
-    printf("%3.6e ", a->work[i]);
-  }
-  printf("\n");
-
   /* work = M \ work, where M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &bmem, a->ipiv, a->work, &blen, &info);
   nrm = BLAS(nrm2)(&bmem, a->work, &one);
@@ -180,27 +170,10 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
     /*       a->type1 ? 1 : 2, (int)a->iter, (int)info, nrm);         */
     return -1;
   }
-
-  /* debug */
-  printf("SY divide Sg = ");
-  for (i=0;i < imax;i++) {
-    printf("%3.6e ", a->work[i]);
-  }
-  printf("\n");
-
   /* if solve was successful then set f -= D * work */
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
    &one);
-
-  /* debug */
-  printf("D = [");
-  imax = 2;
-  for (i=0;i < imax;i++) {
-    printf("%3.6e ", a->D[i]);
-  }
-  printf("];\n");
-
   TIME_TOC
   return (aa_int)info;
 }
@@ -252,26 +225,6 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   if (a->iter++ == 0) {
     return 0;
   }
-
-  /* debug */
-  printf("s0 = [");
-  int imax = 2;
-  int i;
-  for (i=0;i < imax;i++) {
-    printf("%3.6e ", a->S[i]);
-  }
-  printf("];\n");
-  printf("y0 = [");
-  for (i=0;i < imax;i++) {
-    printf("%3.6e ", a->Y[i]);
-  }
-  printf("];\n");
-  printf("g1 = [");
-  for (i=0;i < imax;i++) {
-    printf("%3.6e ", a->g[i]);
-  }
-  printf("];\n");
-
   /* solve linear system, new point overwrites f if successful */
   status = solve(f, a, MIN(a->iter - 1, a->mem));
   TIME_TOC

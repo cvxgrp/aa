@@ -4,7 +4,7 @@ import aa
 
 ### quadratic gradient descent ###
 # data and hyper-parameters
-n = 10
+n = 2#10
 np.random.seed(1)
 x0 = np.random.randn(n)
 Q = np.random.randn(n,n)
@@ -37,6 +37,11 @@ x2 = gd(x1)
 g1 = x1 - x2
 y0 = g1 - g0
 x2_aa = x1 - g1 - (s0-y0)*np.dot(s0,g1)/np.dot(s0,y0)
+print('Sg = {}'.format(np.dot(s0,g1)))
+print('SY divide Sg = {}'.format(np.dot(s0,g1)/np.dot(s0,y0)))
+print('D = {}'.format(s0-y0))
+print('s0 = {}; \ny0 = {}; \ng1 = {}'.format(s0, y0, g1))
+print()
 print('### aa-i-s results ###')
 #x2_aa = x1 - g1 - (x2-x1)*np.dot(s0,g1)/np.dot(s0,y0)
 #print('err of x: ', np.linalg.norm(x))

@@ -5,8 +5,8 @@ import aa
 ### least-squares gradient descent ###
 # data and hyper-parameters
 np.random.seed(1)
-n = 100
-m = 300
+n = 500#100
+m = 750#300
 A = np.random.randn(m,n)
 #b = np.random.randn(m,1)
 b = np.random.randn(m)
@@ -25,7 +25,7 @@ aa1s_wrk = aa1s.AndersonAccelerator(n, mem, params, type1)
 print('### aa-i-s, least squares gradient descent ###')
 #x = np.zeros((n,1))
 x = np.zeros(n)
-for i in range(300):
+for i in range(N):
     x = aa1s_wrk.apply(ls_gd, x)
     #x = ls_gd(x)
     if i % 10 == 0:
