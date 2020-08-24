@@ -1,2 +1,5 @@
 out
 *.o
+python/build/
+python/__pycache__/
+

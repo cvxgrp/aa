@@ -59,6 +59,7 @@ for i in range(2):
 	x_prev = np.copy(x)
 	#x -= step * Q.dot(x)
 	x = gd(x)
+	print('x = {}; x_prev = {}.'.format(x, x_prev))
 	aa_wrk.apply(x, x_prev)
 	print('i: ', i, ' err: ', np.linalg.norm(x))
 

@@ -165,7 +165,7 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   
   /* debug */
   printf("Sg = ");
-  int imax = 1;
+  int imax = a->mem;
   int i;
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->work[i]);
@@ -195,7 +195,7 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
 
   /* debug */
   printf("D = [");
-  imax = 2;
+  imax = a->dim * a->mem;
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->D[i]);
   }
@@ -248,12 +248,47 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   if (a->mem <= 0) {
     return 0;
   }
+
+  /* debug */
+  printf("x = [");
+  int imax = a->dim;
+  int i;
+  for (i=0; i<imax; i++) {
+    printf("%3.6e ", x[i]);
+  }
+  printf("];\n");
+  printf("x_prev = [");
+  for (i=0; i<imax; i++) {
+    printf("%3.6e ", a->x[i]);
+  }
+  printf("];\n");
+  printf("f = [");
+  for (i=0; i<imax; i++) {
+    printf("%3.6e ", f[i]);
+  }
+  printf("];\n");
+  printf("f_prev = [");
+  for (i=0; i<imax; i++) {
+    printf("%3.6e ", a->f[i]);
+  }
+  printf("];\n");
+  printf("g = [");
+  for (i=0; i<imax; i++) {
+    printf("%3.6e ", a->g[i]);
+  }
+  printf("];\n");
+  printf("g_prev = [");
+  for (i=0; i<imax; i++) {
+    printf("%3.6e ", a->g_prev[i]);
+  }
+  printf("];\n");
+
+
   update_accel_params(x, f, a);
 
   /* debug */
   printf("S0 = [");
-  int imax = 4;
-  int i;
+  imax = a->dim * a->mem;
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->S[i]);
   }
@@ -263,7 +298,7 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     printf("%3.6e ", a->Y[i]);
   }
   printf("];\n");
-  imax = 2;
+  imax = a->dim;
   printf("g1 = [");
   for (i=0;i < imax;i++) {
     printf("%3.6e ", a->g[i]);
