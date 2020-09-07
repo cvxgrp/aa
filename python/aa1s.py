@@ -20,6 +20,7 @@ class AndersonAccelerator:
             wrk['D'] = params['D']
             wrk['eps'] = params['eps']
             wrk['beta_0'] = params['beta_0'] # mixing parameter of averaged iteration
+            wrk['fp'] = params['fp'] # fixed point mapping as a function object (or pointer to it in C)
             wrk['Ubar'] = None # store norm of g0
             # storage of previous iterates
             wrk['aa'] = True # whether the previous AA candidate is accepted 
@@ -93,21 +94,27 @@ class AndersonAccelerator:
 
         else:
             ## additional extensions can be added here ...
+            ## for extensions, additional quantities may need to be stored in wrk
             # objective decrease
             # domain checking
             # etc.
             pass
 
     ## AA main update
-    ## chunk it up???
-    def apply(self, fp, x):
+    ## TODO1: chunk it up???
+    ## TODO2: better comment
+    ## TODO3: double check if the result is the same as the one before interface change
+    ## TODON: double check example_lsgd.py to see why NaNs appear after getting to high accuracies 
+    #         current approach: change back to safeguarded iterate when NaNs appear
+    #         better approach (TODO): restart again in case of NaNs
+    def apply(self, f, x):
         ''' AA main update
         Input: 
-            fp: fixed point mapping
+            f: f(x)
             x: input iterate to the update
 
         Output:
-            x1: next iterate
+            f overwritten with the accelerated iterate
         '''
         ## load the data and (hyper-)parameters
         wrk = self._wrk 
@@ -121,6 +128,7 @@ class AndersonAccelerator:
             theta = wrk['theta']
             tau = wrk['tau']
             beta_0 = wrk['beta_0']
+            fp = wrk['fp']
             aa = wrk['aa']
             x_aa = wrk['x_aa']
             x_k_1 = wrk['x_k_1']
@@ -136,20 +144,17 @@ class AndersonAccelerator:
 
             ## return the fixed-point mapping result for the first iteration
             if iter_cnt == 0:
-                x1 = beta_0*x + (1-beta_0)*fp(x) # KM iteration
+                x1 = beta_0*x + (1-beta_0)*f # KM iteration
                 g = x - x1
                 wrk['x_k_1'] = x
                 wrk['g_k_1'] = g
                 wrk['Ubar'] = norm(g)
                 wrk['iter_cnt'] = iter_cnt + 1
-                #self._wrk = wrk
-                #print(x)
-                return x1 
-
-            #print(iter_cnt, x_k_1)
+                f[:] = x1
+                return 
 
             m += 1
-            x1 = beta_0*x + (1-beta_0)*fp(x) # KM iteration
+            x1 = beta_0*x + (1-beta_0)*f # KM iteration
             g = x - x1
             wrk['x_k_1'] = x
             wrk['g_k_1'] = g
@@ -174,7 +179,6 @@ class AndersonAccelerator:
                     s_k_1_hat = s_k_1
                 ### restart if not strongly independent
                 if np.linalg.norm(s_k_1_hat) < tau * np.linalg.norm(s_k_1):
-                    #print('restarted!!!')
                     rec_restart.append(iter_cnt)
                     wrk['rec_restart'] = rec_restart
                     s_k_1_hat = s_k_1
@@ -185,7 +189,6 @@ class AndersonAccelerator:
 
             else: 
                 # memory exceeds
-                #print('memory exceeds')
                 s_k_1_hat = s_k_1
                 m = 1
                 Shat_mem = []
@@ -202,7 +205,6 @@ class AndersonAccelerator:
             gamma_k_1 = s_k_1_hat.transpose() @ self.H_AA(y_k_1, H_vecs1, H_vecs2) / (np.linalg.norm(s_k_1_hat)**2)
             theta_k_1 = self.phi(gamma_k_1, theta);
             y_k_1_tilde = theta_k_1 * y_k_1 - (1-theta_k_1) * g_k_1
-            #print('y_k_1_tilde - y_k_1 = {}'.format(norm(y_k_1_tilde-y_k_1)))
 
             ## Update H_vecs
             Hytilde = self.H_AA(y_k_1_tilde, H_vecs1, H_vecs2)
@@ -220,11 +222,6 @@ class AndersonAccelerator:
             ## AA candidate update
             x_aa = x - self.H_AA(g, H_vecs1, H_vecs2)
 
-            # ## debug
-            # x_aa_tmp = x - g - (s_k_1 - y_k_1)*np.dot(s_k_1, g) / np.dot(s_k_1,y_k_1)
-            # print('x_aa - x_aa_tmp = {}'.format(norm(x_aa - x_aa_tmp)))
-            # print('norm of x_aa_tmp = {}'.format(norm(x_aa_tmp)))
-
             ## Update workspace
             wrk['iter_cnt'] = iter_cnt + 1
             wrk['m'] = m
@@ -234,24 +231,20 @@ class AndersonAccelerator:
 
             ## safeguard checking 
             # generalize to check every M steps like in a2dr??? 
-            if not self.safeguard(wrk, safeguard_type):
-                # AA candidate rejected
-                #print('iter = {}; AA not pass'.format(iter_cnt))
-                #print('safeguarded!!!')
+            # if x_aa contains NaNs, then invoke safeguard
+            if (not self.safeguard(wrk, safeguard_type)) or np.isnan(np.sum(x_aa)):
+                # AA candidate rejected)
                 rec_safeguard.append(iter_cnt)
                 wrk['rec_safeguard'] = rec_safeguard
                 wrk['aa'] = False
                 wrk['x_aa'] = x_aa
-                #self._wrk = wrk
-                return x1
+                f[:] = x1
             else:
                 # AA candidate to be accepted
-                #print('iter = {}; AA passed!'.format(iter_cnt))
                 wrk['aa'] = True
                 wrk['aa_cnt'] = aa_cnt + 1
-                #self._wrk = wrk
-                return x_aa
+                f[:] = x_aa
 
         else:
-            # WIP: non-convex momentum type1 and type2 
+            # WIP: type2 AA update
             pass
