@@ -2,7 +2,6 @@ import numpy as np
 import aa1s
 import aa
 import matplotlib.pyplot as plt
-import copy
 
 ### quadratic gradient descent ###
 # data and hyper-parameters
@@ -22,12 +21,12 @@ step = 0.0005
 def gd(x):
 	return x - step * Q.dot(x)
 
-params = {'theta':0, 'tau':0, 'D':1e6, 'eps':1e-6, 'beta_0':0, 'fp': gd}
+params = {'theta':0.01, 'tau':0.001, 'D':1e6, 'eps':1e-6, 'beta_0':0.001, 'fp': gd}
 
 x0_norm = np.linalg.norm(x0)
 
 # gd
-print('### gd: simple QP gradient descent')
+print('### gd: simple QP gradient descent ###')
 x = np.copy(x0)
 rec_gd = [x0_norm]
 print('i: 0 err: ', np.linalg.norm(x))
@@ -42,7 +41,7 @@ if i % print_gap != 0:
 print()
 
 # aa-i-s
-print('### aa-i-s: simple QP gradient descent')
+print('### aa-i-s: simple QP gradient descent ###')
 aa1s_wrk = aa1s.AndersonAccelerator(dim, mem, params, type1)
 x = np.copy(x0)
 rec_aa1s = [x0_norm]
@@ -60,7 +59,7 @@ if i % print_gap != 0:
 print()
 
 # original aa1 implementation
-print('### vanilla aa1: simple QP gradient descent')
+print('### vanilla aa1: simple QP gradient descent ###')
 aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
 x = np.copy(x0)
 rec_aa1 = [x0_norm]

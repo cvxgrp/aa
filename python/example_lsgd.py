@@ -2,7 +2,6 @@ import numpy as np
 import aa1s
 import aa
 import matplotlib.pyplot as plt
-import copy
 
 ### https://docs.python.org/3/library/warnings.html
 #import warnings
@@ -33,10 +32,10 @@ t = 0.0002
 def ls_gd(x):
     return x - t * A.T.dot(A.dot(x) - b)
 
-params = {'theta':0, 'tau':0, 'D':1e6, 'eps':1e-6, 'beta_0':0, 'fp': ls_gd}
+params = {'theta':0.01, 'tau':0.001, 'D':1e6, 'eps':1e-6, 'beta_0':0.001, 'fp': ls_gd}
 
 # gd
-print('### gd: least squares gradient descent')
+print('### gd: least squares gradient descent ###')
 x = np.zeros(dim)
 err = np.linalg.norm(A.T.dot(A.dot(x) - b))
 rec_gd = [err]
@@ -52,7 +51,7 @@ print()
 
 
 # aa-i-s
-print('### aa-i-s, least squares gradient descent ###')
+print('### aa-i-s: least squares gradient descent ###')
 aa1s_wrk = aa1s.AndersonAccelerator(dim, mem, params, type1)
 #x = np.zeros((n,1))
 x = np.zeros(dim)
@@ -72,7 +71,7 @@ if i % print_gap != 0:
 print()
 
 # original aa1
-print('### vanilla aa1, least squares gradient descent ###')
+print('### vanilla aa1: least squares gradient descent ###')
 aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
 x = np.zeros(dim)
 err = np.linalg.norm(A.T.dot(A.dot(x) - b))
