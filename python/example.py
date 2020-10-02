@@ -1,6 +1,6 @@
 from __future__ import print_function
 import numpy as np
-import aa as aa
+import aa
 
 dim = 1000
 mem = 20

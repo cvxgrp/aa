@@ -17,9 +17,14 @@ To install the package use:
 cd python
 python setup.py install
 ```
+To test, run in the same directory:
+```bash
+python example.py
+```
 
-To initialize the accelerator:
+The Python API is as follows. To initialize the accelerator:
 ```python
+import aa
 aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
 ```
 where:
