@@ -1,5 +1,30 @@
-#include "aa.h"
+/*
+ * Anderson acceleration.
+ *
+ * x: input iterate
+ * x_prev: previous input iterate
+ * f: f(x) output of map f applied to x
+ * g: x - f error
+ * g_prev: previous error
+ * s: x - x_prev
+ * y: g - g_prev
+ * d: s - y
+ *
+ * capital letters are the variables stacked columnwise
+ * idx tracks current index where latest quantities written
+ * idx cycles from left to right columns in matrix
+ *
+ * Type-I:
+ * return x - (S - Y) * ( S'Y + r I)^{-1} ( S'g )
+ *
+ * Type-II:
+ * return x - (S - Y) * ( Y'Y + r I)^{-1} ( Y'g )
+ *
+ * TODO: need to fully implement safeguards
+ *
+ */
 
+#include "aa.h"
 #include "aa_blas.h"
 
 #if PROFILING > 0
@@ -58,6 +83,8 @@ struct ACCEL_WORK {
   aa_int dim;   /* variable dimension */
   aa_int iter;  /* current iteration */
 
+  aa_float eta; /* regularization */
+
   aa_float *x; /* x input to map*/
   aa_float *f; /* f(x) output of map */
   aa_float *g; /* x - f(x) */
@@ -75,28 +102,63 @@ struct ACCEL_WORK {
   aa_float *M; /* S'Y or Y'Y depending on type of aa */
 
   /* workspace variables */
-  aa_float *work;
-  blas_int *ipiv;
+  aa_float *work; /* scratch space */
+  blas_int *ipiv; /* permutation variable, not used after solve */
 };
 
 /* sets a->M to S'Y or Y'Y depending on type of aa used */
-static void set_m(AaWork *a) {
+/* M is len x len after this */
+static void set_m(AaWork *a, aa_int len) {
   TIME_TIC
-  blas_int bdim = (blas_int)(a->dim), bmem = (blas_int)a->mem;
+  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
+  aa_int i;
+  blas_int bdim = (blas_int)(a->dim), one = 1;
+  blas_int blen = (blas_int)len, btotal = (blas_int)(a->dim * len);
   aa_float onef = 1.0, zerof = 0.0;
-  BLAS(gemm)
-  ("Trans", "No", &bmem, &bmem, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
-   a->Y, &bdim, &zerof, a->M, &bmem);
+  /* if len < mem this only uses len cols */
+  BLAS(gemm)("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y,
+              &bdim, a->Y, &bdim, &zerof, a->M, &blen);
+  if (a->eta > 0) {
+    /* TODO: this regularization doesn't make much sense for type-I */
+    /* but we do it anyway since it seems to help */
+    /* typically type-I does better with higher eta (more reg) than type-II */
+    nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
+    nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
+    r = a->eta * (nrm_y * nrm_y + nrm_s * nrm_s);
+    #if EXTRA_VERBOSE > 5
+    printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n", a->iter,
+            len, nrm_y, nrm_s, r);
+    #endif
+    for (i = 0; i < len; ++i){
+      a->M[i + len * i] += r;
+    }
+  }
   TIME_TOC
   return;
 }
 
+/* initialize accel params, in particular x_prev, f_prev, g_prev */
+static void init_accel_params(const aa_float *x, const aa_float *f,
+                              AaWork *a) {
+  blas_int bdim = (blas_int)a->dim;
+  aa_float neg_onef = -1.0;
+  blas_int one = 1;
+  /* x_prev = x */
+  memcpy(a->x, x, sizeof(aa_float) * a->dim);
+  /* f_prev = f */
+  memcpy(a->f, f, sizeof(aa_float) * a->dim);
+  /* g_prev = x */
+  memcpy(a->g_prev, x, sizeof(aa_float) * a->dim);
+  /* g_prev = x_prev - f_prev */
+  BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g_prev, &one);
+}
+
 /* updates the workspace parameters for aa for this iteration */
 static void update_accel_params(const aa_float *x, const aa_float *f,
-                                AaWork *a) {
+                                AaWork *a, aa_int len) {
   /* at the start a->x = x_prev and a->f = f_prev */
   TIME_TIC
-  aa_int idx = a->iter % a->mem;
+  aa_int idx = (a->iter - 1) % a->mem;
   blas_int one = 1;
   blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
@@ -107,18 +169,18 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
   memcpy(a->s, x, sizeof(aa_float) * a->dim);
   /* d = f */
   memcpy(a->d, f, sizeof(aa_float) * a->dim);
-  /* g -= f */
+  /* g =  x - f */
   BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g, &one);
-  /* s -= x_prev */
+  /* s = x - x_prev */
   BLAS(axpy)(&bdim, &neg_onef, a->x, &one, a->s, &one);
-  /* d -= f_prev */
+  /* d = f - f_prev */
   BLAS(axpy)(&bdim, &neg_onef, a->f, &one, a->d, &one);
 
   /* g, s, d correct here */
 
   /* y = g */
   memcpy(a->y, a->g, sizeof(aa_float) * a->dim);
-  /* y -= g_prev */
+  /* y = g - g_prev */
   BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, a->y, &one);
 
   /* y correct here */
@@ -138,7 +200,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
   /* x, f correct here */
 
   /* set M = S'Y or Y'Y depending on type of aa used */
-  set_m(a);
+  set_m(a, len);
 
   /* M correct here */
 
@@ -155,25 +217,32 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
  */
 static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
-  blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len,
-           bmem = (blas_int)a->mem;
+  blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
+  blas_int bmem = (blas_int)a->mem;
   aa_float neg_onef = -1.0, onef = 1.0, zerof = 0.0, nrm;
   /* work = S'g or Y'g */
-  BLAS(gemv)
-  ("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g, &one,
-   &zerof, a->work, &one);
-  /* work = M \ work, where M = S'Y or M = Y'Y */
-  BLAS(gesv)(&blen, &one, a->M, &bmem, a->ipiv, a->work, &blen, &info);
+  BLAS(gemv)("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g,
+              &one, &zerof, a->work, &one);
+  /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
+  BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
   nrm = BLAS(nrm2)(&bmem, a->work, &one);
+  #if EXTRA_VERBOSE > 10
+  printf("AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
+          a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
+  #endif
   if (info < 0 || nrm >= MAX_AA_NRM) {
-    /* printf("Error in AA type %i, iter: %i, info: %i, norm %.2e\n", */
-    /*       a->type1 ? 1 : 2, (int)a->iter, (int)info, nrm);         */
+    #if EXTRA_VERBOSE > 0
+    printf("Error in AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
+            a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
+    #endif
+    /* to restart we simply set a->iter = 0 */
+    a->iter = 0;
+    TIME_TOC
     return -1;
   }
   /* if solve was successful then set f -= D * work */
-  BLAS(gemv)
-  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
-   &one);
+  BLAS(gemv)("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one,
+             &onef, f, &one);
   TIME_TOC
   return (aa_int)info;
 }
@@ -181,7 +250,7 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
 /*
  * API functions below this line, see aa.h for descriptions.
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1) {
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -191,6 +260,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1) {
   a->iter = 0;
   a->dim = dim;
   a->mem = mem;
+  a->eta = eta;
   if (a->mem <= 0) {
     return a;
   }
@@ -218,15 +288,22 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1) {
 aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
   aa_int status;
+  aa_int len = MIN(a->iter, a->mem);
   if (a->mem <= 0) {
     return 0;
   }
-  update_accel_params(x, f, a);
-  if (a->iter++ == 0) {
+  if (a->iter == 0) {
+    /* if first iteration then seed params for next iter */
+    init_accel_params(x, f, a);
+    a->iter++;
+    TIME_TOC
     return 0;
   }
+  /* set various accel quantities */
+  update_accel_params(x, f, a, len);
   /* solve linear system, new point overwrites f if successful */
-  status = solve(f, a, MIN(a->iter - 1, a->mem));
+  status = solve(f, a, len);
+  a->iter++;
   TIME_TOC
   return status;
 }

@@ -10,6 +10,7 @@
 #define TYPE1 (1)
 #define DIM (100)
 #define MEM (10)
+#define ETA (1e-9)
 #define ITERS (1000)
 #define STEPSIZE (0.01)
 #define PRINT (100)
@@ -20,16 +21,18 @@ static aa_float rand_float(void) {
 }
 
 /*
- * out/gd memory dimension step_size type1 seed iters
+ * out/gd memory dimension step_size type1 seed iters eta
  *
  */
 int main(int argc, char **argv) {
   aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
   aa_int i, one = 1;
-  aa_float err, neg_step_size = -STEPSIZE;
+  aa_float err, neg_step_size = -STEPSIZE, eta = ETA;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
 
   switch (argc) {
+  case 8:
+    eta = atof(argv[7]);
   case 7:
     iters = atoi(argv[6]);
   case 6:
@@ -45,7 +48,7 @@ int main(int argc, char **argv) {
     break;
   default:
     printf("Running default parameters.\n");
-    printf("Usage: 'out/gd memory dimension step_size type1 seed iters'\n");
+    printf("Usage: 'out/gd memory dimension step_size type1 seed iters eta'\n");
     break;
   }
 
@@ -72,7 +75,7 @@ int main(int argc, char **argv) {
     Q[i + i * n] += 1.0;
   }
 
-  AaWork *a = aa_init(n, memory, type1);
+  AaWork *a = aa_init(n, memory, type1, eta);
   for (i = 0; i < iters; i++) {
     memcpy(xprev, x, sizeof(aa_float) * n);
     /* x = x - step_size * Q * xprev */

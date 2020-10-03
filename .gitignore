@@ -1,2 +1,5 @@
 out
 *.o
+python/aapy.c
+python/build
+python/.*

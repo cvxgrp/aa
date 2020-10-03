@@ -25,12 +25,13 @@ python example.py
 The Python API is as follows. To initialize the accelerator:
 ```python
 import aa
-aa_wrk = aa.AndersonAccelerator(dim, mem, type1)
+aa_wrk = aa.AndersonAccelerator(dim, mem, type1, eta)
 ```
 where:
 * `dim` is the integer problem dimension.
 * `mem` is the integer amount of memory (or lookback) you want the algorithm to use, around 10 is a good number for this. 
 * `type1` is a boolean, if `True` uses type-1 AA, otherwise uses type-2 AA.
+* `eta`: float, regularization param, type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
 
 To use the accelerator:
 ```python
@@ -56,11 +57,13 @@ The C API is as follows:
  *  dim: the dimension of the variable for aa
  *  mem: the memory (number of past iterations used) for aa
  *  type1: bool, if True use type 1 aa, otherwise use type 2
+ *  eta: float, regularization param, type-I and type-II different
+ *       type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
  *
  * Reurns:
  *  Pointer to aa workspace
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta);
 
 /* Apply Anderson Acceleration.
  *
