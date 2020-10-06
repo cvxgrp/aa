@@ -235,8 +235,8 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
     printf("Error in AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
             a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
     #endif
-    /* to restart we simply set a->iter = 0 */
-    a->iter = 0;
+    /* reset aa for stability */
+    aa_reset(a);
     TIME_TOC
     return -1;
   }
@@ -325,5 +325,11 @@ void aa_finish(AaWork *a) {
     free(a->ipiv);
     free(a);
   }
+  return;
+}
+
+void aa_reset(AaWork *a) {
+  /* to reset we simply set a->iter = 0 */
+  a->iter = 0;
   return;
 }
