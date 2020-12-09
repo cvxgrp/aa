@@ -329,11 +329,11 @@ static aa_int _apply(aa_float *f, const aa_float *x, AaWork *a) {
 }
 
 static void update_output(aa_float * f, AaWork *a) {
-  aa_int i;
 #if AVERAGE_OUTPUTS > 0
+  aa_int i;
   /* average the outputs */
   for (i = 0; i < a->dim; ++i) {
-    a->output[i] += f[i] / a->interval;
+    a->output[i] += (f[i] / a->interval);
   }
 #else
   /* take last output */
@@ -357,11 +357,10 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     /* init input */
     memcpy(a->input, x, sizeof(aa_float) * a->dim);
     /* reset output */
-    memset(a->output, 0, a->dim);
+    memset(a->output, 0, sizeof(aa_float) * a->dim);
   }
   update_output(f, a);
   if ((a->outer_iter + 1) % a->interval == 0) {
-    printf("%i\n", a->outer_iter);
     /* apply aa */
     status = _apply(a->output, a->input, a);
     if (status >= 0) {
