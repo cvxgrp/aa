@@ -26,7 +26,8 @@ typedef struct ACCEL_WORK AaWork;
  * Reurns:
  *  Pointer to aa workspace
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_int interval, 
+                aa_float regularization);
 
 /* Apply Anderson Acceleration.
  *
@@ -56,11 +57,15 @@ void aa_finish(AaWork *a);
  */
 void aa_reset(AaWork *a);
 
-#define MAX_AA_NRM (1e3)
+#define MAX_AA_NRM (1e2)
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+#define SIMPLE_SKIP (0)
+#define AVERAGE_OUTPUTS (0)
 
 #ifdef __cplusplus
 }
 #endif
+
 #endif

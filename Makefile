@@ -3,8 +3,8 @@
 
 OBJECTS = src/aa.o
 
-PROFILING = 0
-CFLAGS += -g -Wall -O3 -Iinclude -DPROFILING=$(PROFILING)
+AA_PROFILING = 0
+CFLAGS += -g -Wall -O3 -Iinclude -DAA_PROFILING=$(AA_PROFILING)
 
 SRC_FILES = $(wildcard src/*.c)
 INC_FILES = $(wildcard include/*.h)

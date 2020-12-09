@@ -27,7 +27,7 @@
 #include "aa.h"
 #include "aa_blas.h"
 
-#if PROFILING > 0
+#if AA_PROFILING > 0
 
 #define TIME_TIC \
   timer __t;     \
@@ -83,7 +83,7 @@ struct ACCEL_WORK {
   aa_int dim;   /* variable dimension */
   aa_int iter;  /* current iteration */
 
-  aa_float eta; /* regularization */
+  aa_float regularization; /* regularization */
 
   aa_float *x; /* x input to map*/
   aa_float *f; /* f(x) output of map */
@@ -104,6 +104,11 @@ struct ACCEL_WORK {
   /* workspace variables */
   aa_float *work; /* scratch space */
   blas_int *ipiv; /* permutation variable, not used after solve */
+
+  aa_int interval; /* skip length */
+  aa_int outer_iter; /* skip length */
+  aa_float *input;
+  aa_float *output;
 };
 
 /* sets a->M to S'Y or Y'Y depending on type of aa used */
@@ -118,13 +123,13 @@ static void set_m(AaWork *a, aa_int len) {
   /* if len < mem this only uses len cols */
   BLAS(gemm)("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y,
               &bdim, a->Y, &bdim, &zerof, a->M, &blen);
-  if (a->eta > 0) {
+  if (a->regularization > 0) {
     /* TODO: this regularization doesn't make much sense for type-I */
     /* but we do it anyway since it seems to help */
-    /* typically type-I does better with higher eta (more reg) than type-II */
+    /* typically need more regularization for type-I than type-II */
     nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
     nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
-    r = a->eta * (nrm_y * nrm_y + nrm_s * nrm_s);
+    r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
     #if EXTRA_VERBOSE > 5
     printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n", a->iter,
             len, nrm_y, nrm_s, r);
@@ -250,7 +255,8 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
 /*
  * API functions below this line, see aa.h for descriptions.
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta) {
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_int interval, 
+                aa_float regularization) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -260,11 +266,11 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta) {
   a->iter = 0;
   a->dim = dim;
   a->mem = mem;
-  a->eta = eta;
+  a->interval = interval;
+  a->regularization = regularization;
   if (a->mem <= 0) {
     return a;
   }
-
   a->x = (aa_float *)calloc(a->dim, sizeof(aa_float));
   a->f = (aa_float *)calloc(a->dim, sizeof(aa_float));
   a->g = (aa_float *)calloc(a->dim, sizeof(aa_float));
@@ -282,16 +288,30 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta) {
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
   a->work = (aa_float *)calloc(a->mem, sizeof(aa_float));
   a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
+  
+  a->outer_iter = 0;
+  a->input = (aa_float *)calloc(a->dim, sizeof(aa_float));
+  a->output = (aa_float *)calloc(a->dim, sizeof(aa_float));
+/*
+#if SIMPLE_SKIP == 0
+  if (a->interval > 1) {
+    a->input = (aa_float *)calloc(a->dim, sizeof(aa_float));
+    a->output = (aa_float *)calloc(a->dim, sizeof(aa_float));
+  } else {
+    a->input = 0;
+    a->output = 0;
+  }
+#endif
+*/
   return a;
 }
 
-aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
+
+/* this function is not interval aware, called by aa_apply */
+static aa_int _apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
   aa_int status;
   aa_int len = MIN(a->iter, a->mem);
-  if (a->mem <= 0) {
-    return 0;
-  }
   if (a->iter == 0) {
     /* if first iteration then seed params for next iter */
     init_accel_params(x, f, a);
@@ -304,6 +324,53 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   /* solve linear system, new point overwrites f if successful */
   status = solve(f, a, len);
   a->iter++;
+  TIME_TOC
+  return status;
+}
+
+static void update_output(aa_float * f, AaWork *a) {
+  aa_int i;
+#if AVERAGE_OUTPUTS > 0
+  /* average the outputs */
+  for (i = 0; i < a->dim; ++i) {
+    a->output[i] += f[i] / a->interval;
+  }
+#else
+  /* take last output */
+  memcpy(a->output, f, sizeof(aa_float) * a->dim);
+#endif
+} 
+
+/* this function is interval aware */
+aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
+  TIME_TIC
+  aa_int status = 0;
+  if (a->mem <= 0) {
+    return 0;
+  }
+#if SIMPLE_SKIP > 0
+  if (a->outer_iter % a->interval == 0) {
+    status = _apply(f, x, a);
+  }
+#else
+  if (a->outer_iter % a->interval == 0) {
+    /* init input */
+    memcpy(a->input, x, sizeof(aa_float) * a->dim);
+    /* reset output */
+    memset(a->output, 0, a->dim);
+  }
+  update_output(f, a);
+  if ((a->outer_iter + 1) % a->interval == 0) {
+    printf("%i\n", a->outer_iter);
+    /* apply aa */
+    status = _apply(a->output, a->input, a);
+    if (status >= 0) {
+      /* copy output to f if successful */
+      memcpy(f, a->output, sizeof(aa_float) * a->dim);
+    }
+  }
+#endif
+  a->outer_iter++;
   TIME_TOC
   return status;
 }
@@ -329,7 +396,8 @@ void aa_finish(AaWork *a) {
 }
 
 void aa_reset(AaWork *a) {
-  /* to reset we simply set a->iter = 0 */
+  /* set iteration counters to 0 */
   a->iter = 0;
+  a->outer_iter = 0;
   return;
 }
