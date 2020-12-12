@@ -82,8 +82,9 @@ struct ACCEL_WORK {
   aa_int mem;   /* aa memory */
   aa_int dim;   /* variable dimension */
   aa_int iter;  /* current iteration */
+  aa_int verbosity; /* verbosity level, 0 is no printing */
 
-  aa_float eta; /* regularization */
+  aa_float regularization; /* regularization */
 
   aa_float *x; /* x input to map*/
   aa_float *f; /* f(x) output of map */
@@ -118,17 +119,17 @@ static void set_m(AaWork *a, aa_int len) {
   /* if len < mem this only uses len cols */
   BLAS(gemm)("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y,
               &bdim, a->Y, &bdim, &zerof, a->M, &blen);
-  if (a->eta > 0) {
+  if (a->regularization > 0) {
     /* TODO: this regularization doesn't make much sense for type-I */
     /* but we do it anyway since it seems to help */
-    /* typically type-I does better with higher eta (more reg) than type-II */
+    /* typically type-I does better with higher regularization than type-II */
     nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
     nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
-    r = a->eta * (nrm_y * nrm_y + nrm_s * nrm_s);
-    #if EXTRA_VERBOSE > 5
-    printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n", a->iter,
-            len, nrm_y, nrm_s, r);
-    #endif
+    r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
+    if (a->verbosity > 2) {
+      printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n",
+              a->iter, len, nrm_y, nrm_s, r);
+    }
     for (i = 0; i < len; ++i){
       a->M[i + len * i] += r;
     }
@@ -226,15 +227,15 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
   nrm = BLAS(nrm2)(&bmem, a->work, &one);
-  #if EXTRA_VERBOSE > 10
-  printf("AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
-          a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
-  #endif
-  if (info < 0 || nrm >= MAX_AA_NRM) {
-    #if EXTRA_VERBOSE > 0
-    printf("Error in AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
+  if (a->verbosity > 1) {
+    printf("AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
             a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
-    #endif
+  }
+  if (info < 0 || nrm >= MAX_AA_NRM) {
+    if (a->verbosity > 0) {
+      printf("Error in AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
+              a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
+    }
     /* reset aa for stability */
     aa_reset(a);
     TIME_TOC
@@ -250,7 +251,8 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
 /*
  * API functions below this line, see aa.h for descriptions.
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta) {
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
+                aa_int verbosity) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -260,7 +262,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta) {
   a->iter = 0;
   a->dim = dim;
   a->mem = mem;
-  a->eta = eta;
+  a->verbosity = verbosity;
+  a->regularization = regularization;
   if (a->mem <= 0) {
     return a;
   }

@@ -20,13 +20,15 @@ typedef struct ACCEL_WORK AaWork;
  *  dim: the dimension of the variable for aa
  *  mem: the memory (number of past iterations used) for aa
  *  type1: bool, if True use type 1 aa, otherwise use type 2
- *  eta: float, regularization param, type-I and type-II different
- *       type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
+ *  regularization: float, regularization param, type-I and type-II different
+ *       for type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
+ *  verbosity: if greater than 0 prints out various info
  *
  * Reurns:
  *  Pointer to aa workspace
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regaularization,
+                aa_int verbosity);
 
 /* Apply Anderson Acceleration.
  *

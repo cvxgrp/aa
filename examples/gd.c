@@ -13,7 +13,8 @@
 #define ETA (1e-9)
 #define ITERS (1000)
 #define STEPSIZE (0.01)
-#define PRINT (100)
+#define PRINT_INTERVAL (100)
+#define VERBOSITY (0)
 
 /* uniform random number in [-1,1] */
 static aa_float rand_float(void) {
@@ -26,7 +27,7 @@ static aa_float rand_float(void) {
  */
 int main(int argc, char **argv) {
   aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
-  aa_int i, one = 1;
+  aa_int i, one = 1, verbosity = VERBOSITY;
   aa_float err, neg_step_size = -STEPSIZE, eta = ETA;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
 
@@ -75,7 +76,7 @@ int main(int argc, char **argv) {
     Q[i + i * n] += 1.0;
   }
 
-  AaWork *a = aa_init(n, memory, type1, eta);
+  AaWork *a = aa_init(n, memory, type1, eta, verbosity);
   for (i = 0; i < iters; i++) {
     memcpy(xprev, x, sizeof(aa_float) * n);
     /* x = x - step_size * Q * xprev */
@@ -85,7 +86,7 @@ int main(int argc, char **argv) {
     aa_apply(x, xprev, a);
 
     err = BLAS(nrm2)(&n, x, &one);
-    if (i % PRINT == 0) {
+    if (i % PRINT_INTERVAL == 0) {
       printf("Iter: %i, Err %.4e\n", i, err);
     }
   }
