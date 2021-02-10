@@ -13,9 +13,9 @@ cdef extern from "../include/aa.h":
 cdef class AndersonAccelerator(object):
     cdef AaWork* _wrk
     cdef int _dim
-    def __cinit__(self, dim, mem, type1=False, regularization=1e-9,
+    def __cinit__(self, dim, mem, type1=False, eta=1e-9,
                   verbosity=0):
-        self._wrk = aa_init(dim, mem, type1, regularization, verbosity)
+        self._wrk = aa_init(dim, mem, type1, eta, verbosity)
         self._dim = dim
 
     def apply(self, f, x):
@@ -38,4 +38,3 @@ cdef class AndersonAccelerator(object):
 
     def __dealloc__(self):
         aa_finish(self._wrk)
-
