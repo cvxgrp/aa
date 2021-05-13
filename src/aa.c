@@ -219,14 +219,13 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
 static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
-  blas_int bmem = (blas_int)a->mem;
   aa_float neg_onef = -1.0, onef = 1.0, zerof = 0.0, nrm;
   /* work = S'g or Y'g */
   BLAS(gemv)("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g,
               &one, &zerof, a->work, &one);
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
-  nrm = BLAS(nrm2)(&bmem, a->work, &one);
+  nrm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
             a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
