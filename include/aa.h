@@ -22,7 +22,7 @@ typedef struct ACCEL_WORK AaWork;
  *  type1: bool, if True use type 1 aa, otherwise use type 2
  *  regularization: float, regularization param, type-I and type-II different
  *       for type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
- *  relaxation: float \in [0,1], mixing parameter (1.0 is vanilla AA)
+ *  relaxation: float \in [0,2], mixing parameter (1.0 is vanilla AA)
  *  verbosity: if greater than 0 prints out various info
  *
  * Reurns:

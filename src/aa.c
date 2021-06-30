@@ -238,12 +238,12 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
-    printf("AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
+    printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
             a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, aa_norm);
   }
   if (info < 0 || aa_norm >= MAX_AA_NORM) {
     if (a->verbosity > 0) {
-      printf("Error in AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
+      printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
               a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, aa_norm);
     }
     /* reset aa for stability */

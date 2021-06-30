@@ -5,6 +5,10 @@ AA (`Anderson Acceleration`)
 
 C (with python interface) implementation of the Anderson Acceleration algorithm as described in our paper [Globally Convergent Type-I Anderson Acceleration for Non-Smooth Fixed-Point Iterations](https://web.stanford.edu/~boyd/papers/nonexp_global_aa1.html)
 
+NOTE: This implementation is a simple proof-of-concept and does not include all
+the necessary stabilizations required to guarantee convergence. However, it
+works well in many cases.
+
 MATLAB code (and the experiments presented in the paper) available [here](https://github.com/cvxgrp/nonexp_global_aa1/): 
 
 ----
@@ -31,7 +35,9 @@ where:
 * `dim` is the integer problem dimension.
 * `mem` is the integer amount of memory (or lookback) you want the algorithm to use, around 10 is a good number for this. 
 * `type1` is a boolean, if `True` uses type-1 AA, otherwise uses type-2 AA.
-* `eta`: float, regularization param, type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
+* `regularization`: float, regularization param, type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
+* `relaxation`: float \in [0,2], mixing parameter (1.0 is vanilla AA)
+* `verbosity`: verbosity level, if greater than 0 prints out various info
 
 To use the accelerator:
 ```python
@@ -57,13 +63,16 @@ The C API is as follows:
  *  dim: the dimension of the variable for aa
  *  mem: the memory (number of past iterations used) for aa
  *  type1: bool, if True use type 1 aa, otherwise use type 2
- *  eta: float, regularization param, type-I and type-II different
- *       type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
- *
+ *  regularization: float, regularization param, type-I and type-II different
+ *       for type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
+ *  relaxation: float \in [0,1], mixing parameter (1.0 is vanilla AA)
+ *  verbosity: if greater than 0 prints out various info
+
  * Reurns:
  *  Pointer to aa workspace
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
+                aa_float relaxation, aa_int verbosity);
 
 /* Apply Anderson Acceleration.
  *
@@ -73,9 +82,11 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float eta);
  *  a: aa workspace from aa_init
  *
  * Returns:
- *  int, a value of 0 is success, <0 is failure at which point f is unchanged
+ *  (float) (+ or -) norm of AA weights vector:
+ *    if positive then update was accepted and f contains new point
+ *    if negative then update was rejected and f is unchanged
  */
-aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a);
+aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a);
 
 /* Finish Anderson Acceleration, clears memory.
  *
