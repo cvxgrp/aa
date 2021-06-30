@@ -228,7 +228,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
 static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
-  aa_float onef = 1.0, zerof = 0.0, neg_onef = -1.0, nrm;
+  aa_float onef = 1.0, zerof = 0.0, neg_onef = -1.0, aa_norm;
   aa_float one_m_relaxation = 1. - a->relaxation;
 
   /* work = S'g or Y'g */
@@ -236,20 +236,20 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
               &one, &zerof, a->work, &one);
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
-  nrm = BLAS(nrm2)(&blen, a->work, &one);
+  aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
-            a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
+            a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, aa_norm);
   }
-  if (info < 0 || nrm >= MAX_AA_NRM) {
+  if (info < 0 || aa_norm >= MAX_AA_NORM) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, info: %i, norm %.2e\n",
-              a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, nrm);
+              a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, aa_norm);
     }
     /* reset aa for stability */
     aa_reset(a);
     TIME_TOC
-    return -1;
+    return -aa_norm;
   }
 
   /* if solve was successful compute new point */
@@ -270,7 +270,7 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
     BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
   }
   TIME_TOC
-  return (aa_int)info;
+  return aa_norm;
 }
 
 /*
@@ -321,9 +321,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   return a;
 }
 
-aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
+aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
-  aa_int status;
+  aa_float aa_norm;
   aa_int len = MIN(a->iter, a->mem);
   if (a->mem <= 0) {
     return 0;
@@ -338,10 +338,10 @@ aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   /* set various accel quantities */
   update_accel_params(x, f, a, len);
   /* solve linear system, new point overwrites f if successful */
-  status = solve(f, a, len);
+  aa_norm = solve(f, a, len);
   a->iter++;
   TIME_TOC
-  return status;
+  return aa_norm;
 }
 
 void aa_finish(AaWork *a) {

@@ -39,9 +39,11 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
  *  a: aa workspace from aa_init
  *
  * Returns:
- *  int, a value of 0 is success, <0 is failure at which point f is unchanged
+ *  (float) (+ or -) norm of AA weights vector:
+ *    if positive then update was accepted and f contains new point
+ *    if negative then update was rejected and f is unchanged
  */
-aa_int aa_apply(aa_float *f, const aa_float *x, AaWork *a);
+aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a);
 
 /* Finish Anderson Acceleration, clears memory.
  *
@@ -59,7 +61,7 @@ void aa_finish(AaWork *a);
  */
 void aa_reset(AaWork *a);
 
-#define MAX_AA_NRM (1e3)
+#define MAX_AA_NORM (1e3)
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 

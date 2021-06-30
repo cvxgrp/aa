@@ -15,7 +15,7 @@
 #define ITERS (1000)
 #define STEPSIZE (0.01)
 #define PRINT_INTERVAL (100)
-#define VERBOSITY (0)
+#define VERBOSITY (1)
 
 /* uniform random number in [-1,1] */
 static aa_float rand_float(void) {
