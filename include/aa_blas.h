@@ -56,6 +56,9 @@ void BLAS(gemm)(const char *transa, const char *transb, blas_int *m,
                 blas_int *n, blas_int *k, aa_float *alpha, aa_float *a,
                 blas_int *lda, aa_float *b, blas_int *ldb, aa_float *beta,
                 aa_float *c, blas_int *ldc);
+void BLAS(scal)(const blas_int *n, const aa_float *a, aa_float *x,
+                const blas_int *incx);
+
 
 #ifdef __cplusplus
 }
