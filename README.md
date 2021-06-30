@@ -36,7 +36,7 @@ where:
 * `mem` is the integer amount of memory (or lookback) you want the algorithm to use, around 10 is a good number for this. 
 * `type1` is a boolean, if `True` uses type-1 AA, otherwise uses type-2 AA.
 * `regularization`: float, regularization param, type-I: 1e-8 works well, type-II: more stable can use 1e-10 often
-* `relaxation`: float \in [0,2], mixing parameter (1.0 is vanilla AA)
+* `relaxation`: float in [0,2], mixing parameter (1.0 is vanilla AA)
 * `verbosity`: verbosity level, if greater than 0 prints out various info
 
 To use the accelerator:

@@ -114,8 +114,8 @@ struct ACCEL_WORK {
 /* M is len x len after this */
 static void set_m(AaWork *a, aa_int len) {
   TIME_TIC
-  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
   aa_int i;
+  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
   blas_int bdim = (blas_int)(a->dim), one = 1;
   blas_int blen = (blas_int)len, btotal = (blas_int)(a->dim * len);
   aa_float onef = 1.0, zerof = 0.0;
@@ -133,7 +133,7 @@ static void set_m(AaWork *a, aa_int len) {
       printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n",
               a->iter, len, nrm_y, nrm_s, r);
     }
-    for (i = 0; i < len; ++i){
+    for (i = 0; i < len; ++i) {
       a->M[i + len * i] += r;
     }
   }
@@ -266,7 +266,7 @@ static aa_int solve(aa_float *f, AaWork *a, aa_int len) {
                &onef, a->x_work, &one);
     /* f = relaxation * f */
     BLAS(scal)(&blen, &a->relaxation, f, &one);
-    /* f += (1 - relaxation) * x */
+    /* f += (1 - relaxation) * x_work */
     BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
   }
   TIME_TOC
