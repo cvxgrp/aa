@@ -370,7 +370,7 @@ void aa_finish(AaWork *a) {
 void aa_reset(AaWork *a) {
   /* to reset we simply set a->iter = 0 */
   if (a->verbosity > 1) {
-    printf("AA reset\n.");
+    printf("AA reset.\n");
   }
   a->iter = 0;
   return;
