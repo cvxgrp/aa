@@ -110,37 +110,6 @@ struct ACCEL_WORK {
   aa_float *x_work; /* workspace (= x) for when relaxation != 1.0 */
 };
 
-/* sets a->M to S'Y or Y'Y depending on type of aa used */
-/* M is len x len after this */
-static void set_m(AaWork *a, aa_int len) {
-  TIME_TIC
-  aa_int i;
-  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
-  blas_int bdim = (blas_int)(a->dim), one = 1;
-  blas_int blen = (blas_int)len, btotal = (blas_int)(a->dim * len);
-  aa_float onef = 1.0, zerof = 0.0;
-  /* if len < mem this only uses len cols */
-  BLAS(gemm)("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y,
-              &bdim, a->Y, &bdim, &zerof, a->M, &blen);
-  if (a->regularization > 0) {
-    /* TODO: this regularization doesn't make much sense for type-I */
-    /* but we do it anyway since it seems to help */
-    /* typically type-I does better with higher regularization than type-II */
-    nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
-    nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
-    r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
-    if (a->verbosity > 2) {
-      printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n",
-              a->iter, len, nrm_y, nrm_s, r);
-    }
-    for (i = 0; i < len; ++i) {
-      a->M[i + len * i] += r;
-    }
-  }
-  TIME_TOC
-  return;
-}
-
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
 static void init_accel_params(const aa_float *x, const aa_float *f,
                               AaWork *a) {
@@ -210,7 +179,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
   /* x, f correct here */
 
   /* set M = S'Y or Y'Y depending on type of aa used */
-  set_m(a, len);
+  /* set_m(a, len); */
 
   /* M correct here */
 
@@ -225,17 +194,32 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
 /* solves the system of equations to perform the aa update
  * at the end f contains the next iterate to be returned
  */
-static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
+static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
-  aa_float onef = 1.0, zerof = 0.0, neg_onef = -1.0, aa_norm;
+  blas_int neg_one = -1;
+  aa_float onef = 1.0, neg_onef = -1.0, aa_norm;
   aa_float one_m_relaxation = 1. - a->relaxation;
 
-  /* work = S'g or Y'g */
-  BLAS(gemv)("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g,
-              &one, &zerof, a->work, &one);
-  /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
-  BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
+  blas_int rank;
+  blas_int lwork;
+
+  memcpy(a->work, a->g, a->dim * sizeof(aa_float));
+
+  blas_int *jpvt = (blas_int *)calloc(len, sizeof(blas_int));
+  aa_float rcond = 1e-6;
+
+  aa_float *mat = (aa_float *)malloc(a->dim * len * sizeof(aa_float));
+  memcpy(mat, a->Y, a->dim * len * sizeof(aa_float));
+
+  aa_float worksize;
+  BLAS(gelsy)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond,
+              &rank, &worksize, &neg_one, &info);
+  lwork = (blas_int)worksize;
+  aa_float *work = (aa_float *)malloc(lwork * sizeof(aa_float));
+  BLAS(gelsy)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond,
+              &rank, work, &lwork, &info);
+
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
@@ -248,6 +232,9 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     }
     /* reset aa for stability */
     aa_reset(a);
+    free(jpvt);
+    free(mat);
+    free(work);
     TIME_TOC
     return -aa_norm;
   }
@@ -309,7 +296,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
-  a->work = (aa_float *)calloc(a->mem, sizeof(aa_float));
+  a->work = (aa_float *)calloc(a->dim, sizeof(aa_float));
   a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
 
   if (relaxation != 1.0) {
@@ -338,7 +325,8 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   /* set various accel quantities */
   update_accel_params(x, f, a, len);
   /* solve linear system, new point overwrites f if successful */
-  aa_norm = solve(f, a, len);
+  /*aa_norm = solve(f, a, len); */
+  aa_norm = solve_with_gelsy(f, a, len);
   a->iter++;
   TIME_TOC
   return aa_norm;

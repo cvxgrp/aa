@@ -7,11 +7,11 @@
 
 /* default parameters */
 #define SEED (1)
-#define TYPE1 (1)
+#define TYPE1 (0)
 #define DIM (100)
 #define MEM (10)
-#define REGULARIZATION (1e-9)
-#define RELAXATION (0.9)
+#define REGULARIZATION (0)
+#define RELAXATION (1.0)
 #define ITERS (1000)
 #define STEPSIZE (0.01)
 #define PRINT_INTERVAL (100)
