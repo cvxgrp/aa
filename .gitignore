@@ -1,5 +1,6 @@
 out
 *.o
+*.swp
 python/aapy.c
 python/build
 python/.*

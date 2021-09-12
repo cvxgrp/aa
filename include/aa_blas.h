@@ -62,7 +62,6 @@ void BLAS(gelsy)(blas_int *m, blas_int *n, blas_int *nrhs, aa_float *a,
                  blas_int *lda, aa_float *b, blas_int *ldb, blas_int *jpvt,
                  aa_float *rcond, blas_int *rank, aa_float *work, blas_int *lwork, blas_int *info);
 
-
 #ifdef __cplusplus
 }
 #endif
