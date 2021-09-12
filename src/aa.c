@@ -20,17 +20,18 @@
  * Type-II:
  * return f = f - (S - Y) * ( Y'Y + r I)^{-1} ( Y'g )
  *
- * TODO: need to fully implement safeguards
- *
  */
 
 #include "aa.h"
 #include "aa_blas.h"
 
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
 #if PROFILING > 0
 
-#define TIME_TIC \
-  timer __t;     \
+#define TIME_TIC                                                               \
+  timer __t;                                                                   \
   tic(&__t);
 #define TIME_TOC toc(__func__, &__t);
 
@@ -40,7 +41,9 @@ typedef struct timer {
   struct timespec toc;
 } timer;
 
-void tic(timer *t) { clock_gettime(CLOCK_MONOTONIC, &t->tic); }
+void tic(timer *t) {
+  clock_gettime(CLOCK_MONOTONIC, &t->tic);
+}
 
 aa_float tocq(timer *t) {
   struct timespec temp;
@@ -78,21 +81,25 @@ aa_float toc(const char *str, timer *t) {
 
 /* contains the necessary parameters to perform aa at each step */
 struct ACCEL_WORK {
-  aa_int type1; /* bool, if true type 1 aa otherwise type 2 */
-  aa_int mem;   /* aa memory */
-  aa_int dim;   /* variable dimension */
-  aa_int iter;  /* current iteration */
+  aa_int type1;     /* bool, if true type 1 aa otherwise type 2 */
+  aa_int mem;       /* aa memory */
+  aa_int dim;       /* variable dimension */
+  aa_int iter;      /* current iteration */
   aa_int verbosity; /* verbosity level, 0 is no printing */
+  aa_int success;   /* was the last AA step successful or not */
 
-  aa_float relaxation; /* relaxation x and f, beta in some papers */
-  aa_float regularization; /* regularization */
+  aa_float relaxation;          /* relaxation x and f, beta in some papers */
+  aa_float regularization;      /* regularization */
+  aa_float safeguard_tolerance; /* safeguard tolerance factor */
+  aa_float max_aa_norm;         /* maximum norm of AA weights */
 
-  aa_float *x; /* x input to map*/
-  aa_float *f; /* f(x) output of map */
-  aa_float *g; /* x - f(x) */
+  aa_float *x;     /* x input to map*/
+  aa_float *f;     /* f(x) output of map */
+  aa_float *g;     /* x - f(x) */
+  aa_float norm_g; /* ||x - f(x)|| */
 
   /* from previous iteration */
-  aa_float *g_prev; /* x - f(x) */
+  aa_float *g_prev; /* x_prev - f(x_prev) */
 
   aa_float *y; /* g - g_prev */
   aa_float *s; /* x - x_prev */
@@ -120,8 +127,9 @@ static void set_m(AaWork *a, aa_int len) {
   blas_int blen = (blas_int)len, btotal = (blas_int)(a->dim * len);
   aa_float onef = 1.0, zerof = 0.0;
   /* if len < mem this only uses len cols */
-  BLAS(gemm)("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y,
-              &bdim, a->Y, &bdim, &zerof, a->M, &blen);
+  BLAS(gemm)
+  ("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
+   a->Y, &bdim, &zerof, a->M, &blen);
   if (a->regularization > 0) {
     /* TODO: this regularization doesn't make much sense for type-I */
     /* but we do it anyway since it seems to help */
@@ -131,7 +139,7 @@ static void set_m(AaWork *a, aa_int len) {
     r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
     if (a->verbosity > 2) {
       printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n",
-              a->iter, len, nrm_y, nrm_s, r);
+             a->iter, len, nrm_y, nrm_s, r);
     }
     for (i = 0; i < len; ++i) {
       a->M[i + len * i] += r;
@@ -142,8 +150,7 @@ static void set_m(AaWork *a, aa_int len) {
 }
 
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
-static void init_accel_params(const aa_float *x, const aa_float *f,
-                              AaWork *a) {
+static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
   blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
   blas_int one = 1;
@@ -158,8 +165,8 @@ static void init_accel_params(const aa_float *x, const aa_float *f,
 }
 
 /* updates the workspace parameters for aa for this iteration */
-static void update_accel_params(const aa_float *x, const aa_float *f,
-                                AaWork *a, aa_int len) {
+static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
+                                aa_int len) {
   /* at the start a->x = x_prev and a->f = f_prev */
   TIME_TIC
   aa_int idx = (a->iter - 1) % a->mem;
@@ -213,10 +220,11 @@ static void update_accel_params(const aa_float *x, const aa_float *f,
   set_m(a, len);
 
   /* M correct here */
-
   memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
-
   /* g_prev set for next iter here */
+
+  /* compute ||g|| = ||f - x|| */
+  a->norm_g = BLAS(nrm2)(&bdim, a->g, &one);
 
   TIME_TOC
   return;
@@ -232,20 +240,23 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   aa_float one_m_relaxation = 1. - a->relaxation;
 
   /* work = S'g or Y'g */
-  BLAS(gemv)("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g,
-              &one, &zerof, a->work, &one);
+  BLAS(gemv)
+  ("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g, &one,
+   &zerof, a->work, &one);
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-            a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, aa_norm);
+           a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
-  if (info < 0 || aa_norm >= MAX_AA_NORM) {
+  /* info < 0 input error, input > 0 matrix is singular */
+  if (info != 0 || aa_norm >= a->max_aa_norm) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-              a->type1 ? 1 : 2, (int)a->iter, (int) len, (int)info, aa_norm);
+             a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
     }
+    a->success = 0;
     /* reset aa for stability */
     aa_reset(a);
     TIME_TOC
@@ -256,19 +267,22 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
 
   /* first set f -= D * work */
-  BLAS(gemv)("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one,
-             &onef, f, &one);
+  BLAS(gemv)
+  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
+   &one);
 
   /* if relaxation is not 1 then need to incorporate */
   if (a->relaxation != 1.0) {
     /* x_work = x - S * work */
-    BLAS(gemv)("NoTrans", &bdim, &blen, &neg_onef, a->S, &bdim, a->work, &one,
-               &onef, a->x_work, &one);
+    BLAS(gemv)
+    ("NoTrans", &bdim, &blen, &neg_onef, a->S, &bdim, a->work, &one, &onef,
+     a->x_work, &one);
     /* f = relaxation * f */
     BLAS(scal)(&blen, &a->relaxation, f, &one);
     /* f += (1 - relaxation) * x_work */
     BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
   }
+  a->success = 1;
   TIME_TOC
   return aa_norm;
 }
@@ -277,7 +291,8 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
  * API functions below this line, see aa.h for descriptions.
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_int verbosity) {
+                aa_float relaxation, aa_float safeguard_tolerance,
+                aa_float max_aa_norm, aa_int verbosity) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -289,6 +304,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->mem = mem;
   a->regularization = regularization;
   a->relaxation = relaxation;
+  a->safeguard_tolerance = safeguard_tolerance;
+  a->max_aa_norm = max_aa_norm;
+  a->success = 0;
   a->verbosity = verbosity;
   if (a->mem <= 0) {
     return a;
@@ -309,7 +327,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
-  a->work = (aa_float *)calloc(a->mem, sizeof(aa_float));
+  a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
   a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
 
   if (relaxation != 1.0) {
@@ -317,7 +335,6 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   } else {
     a->x_work = 0;
   }
-
   return a;
 }
 
@@ -325,6 +342,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
   aa_float aa_norm;
   aa_int len = MIN(a->iter, a->mem);
+  a->success = 0;
   if (a->mem <= 0) {
     return 0;
   }
@@ -342,6 +360,36 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   a->iter++;
   TIME_TOC
   return aa_norm;
+}
+
+aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
+  blas_int bdim = (blas_int)a->dim;
+  blas_int one = 1;
+  aa_float neg_onef = -1.0;
+  aa_float norm_diff;
+  if (!a->success) {
+    /* last AA update was not successful, no need for safeguarding */
+    return 0;
+  }
+  /* work = x_new */
+  memcpy(a->work, x_new, a->dim * sizeof(aa_float));
+  /* work = x_new - f_new */
+  BLAS(axpy)(&bdim, &neg_onef, f_new, &one, a->work, &one);
+  /* norm_diff = || f_new - x_new || */
+  norm_diff = BLAS(nrm2)(&bdim, a->work, &one);
+  /* g = f - x */
+  if (norm_diff > a->safeguard_tolerance * a->norm_g) {
+    /* in this case we reject the AA step and reset */
+    memcpy(f_new, a->f, a->dim * sizeof(aa_float));
+    memcpy(x_new, a->x, a->dim * sizeof(aa_float));
+    if (a->verbosity > 0) {
+      printf("AA rejection, iter: %i, norm_diff %.4e, prev_norm_diff %.4e\n",
+             (int)a->iter, norm_diff, a->norm_g);
+    }
+    aa_reset(a);
+    return -1;
+  }
+  return 0;
 }
 
 void aa_finish(AaWork *a) {
@@ -369,7 +417,7 @@ void aa_finish(AaWork *a) {
 
 void aa_reset(AaWork *a) {
   /* to reset we simply set a->iter = 0 */
-  if (a->verbosity > 1) {
+  if (a->verbosity > 0) {
     printf("AA reset.\n");
   }
   a->iter = 0;

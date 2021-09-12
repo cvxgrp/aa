@@ -6,15 +6,17 @@
 #include <string.h>
 
 /* default parameters */
-#define SEED (1)
-#define TYPE1 (1)
-#define DIM (100)
+#define SEED (1234)
+#define TYPE1 (0)
+#define DIM (1000)
 #define MEM (10)
-#define REGULARIZATION (1e-9)
-#define RELAXATION (0.9)
-#define ITERS (1000)
-#define STEPSIZE (0.01)
-#define PRINT_INTERVAL (100)
+#define REGULARIZATION (1e-12)
+#define SAFEGUARD_TOLERANCE (2.0)
+#define MAX_AA_NORM (1e4)
+#define RELAXATION (1.0)
+#define ITERS (30000)
+#define STEPSIZE (0.001)
+#define PRINT_INTERVAL (500)
 #define VERBOSITY (1)
 
 /* uniform random number in [-1,1] */
@@ -28,33 +30,43 @@ static aa_float rand_float(void) {
  */
 int main(int argc, char **argv) {
   aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
-  aa_int i, one = 1, verbosity = VERBOSITY;
-  aa_float err, neg_step_size = -STEPSIZE, regularization = REGULARIZATION;
+  aa_int i, one = 1;
+  aa_int verbosity = VERBOSITY;
+  aa_float neg_step_size = -STEPSIZE;
+  aa_float regularization = REGULARIZATION;
   aa_float relaxation = RELAXATION;
+  aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
+  aa_float max_aa_norm = MAX_AA_NORM;
+  aa_float err;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
 
-  switch (argc) {
+  printf("Usage: 'out/gd memory type1 dimension step_size seed iters "
+         "regularization relaxation safeguard_tolerance max_aa_norm'\n");
+
+  switch (argc-1) {
+  case 10:
+    max_aa_norm = atof(argv[10]);
   case 9:
-    relaxation = atof(argv[8]);
+    safeguard_tolerance = atof(argv[9]);
   case 8:
-    regularization = atof(argv[7]);
+    relaxation = atof(argv[8]);
   case 7:
-    iters = atoi(argv[6]);
+    regularization = atof(argv[7]);
   case 6:
-    seed = atoi(argv[5]);
+    iters = atoi(argv[6]);
   case 5:
-    type1 = atoi(argv[4]);
+    seed = atoi(argv[5]);
   case 4:
-    neg_step_size = -atof(argv[3]);
+    neg_step_size = -atof(argv[4]);
   case 3:
-    n = atoi(argv[2]);
+    n = atoi(argv[3]);
   case 2:
+    type1 = atoi(argv[2]);
+  case 1:
     memory = atoi(argv[1]);
     break;
   default:
     printf("Running default parameters.\n");
-    printf("Usage: 'out/gd memory dimension step_size type1 seed iters regularization relaxation'\n");
-    break;
   }
 
   x = malloc(sizeof(aa_float) * n);
@@ -75,25 +87,31 @@ int main(int argc, char **argv) {
   BLAS(gemm)
   ("Trans", "No", &n, &n, &n, &onef, Qhalf, &n, Qhalf, &n, &zerof, Q, &n);
 
-  /* add some regularization */
+  /* add small amount regularization */
   for (i = 0; i < n; i++) {
-    Q[i + i * n] += 1.0;
+    Q[i + i * n] += 1e-6;
   }
 
-  AaWork *a = aa_init(n, memory, type1, regularization, relaxation, verbosity);
+  AaWork *a = aa_init(n, memory, type1, regularization, relaxation,
+                      safeguard_tolerance, max_aa_norm, verbosity);
   for (i = 0; i < iters; i++) {
+    if (i > 0) {
+      aa_apply(x, xprev, a);
+    }
+
     memcpy(xprev, x, sizeof(aa_float) * n);
     /* x = x - step_size * Q * xprev */
     BLAS(gemv)
     ("No", &n, &n, &neg_step_size, Q, &n, xprev, &one, &onef, x, &one);
 
-    aa_apply(x, xprev, a);
+    aa_safeguard(x, xprev, a);
 
     err = BLAS(nrm2)(&n, x, &one);
     if (i % PRINT_INTERVAL == 0) {
       printf("Iter: %i, Err %.4e\n", i, err);
     }
   }
+  printf("Iter: %i, Err %.4e\n", i, err);
   aa_finish(a);
   free(Q);
   free(Qhalf);
