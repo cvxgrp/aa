@@ -88,10 +88,10 @@ struct ACCEL_WORK {
   aa_int verbosity; /* verbosity level, 0 is no printing */
   aa_int success;   /* was the last AA step successful or not */
 
-  aa_float relaxation;          /* relaxation x and f, beta in some papers */
-  aa_float regularization;      /* regularization */
+  aa_float relaxation;       /* relaxation x and f, beta in some papers */
+  aa_float regularization;   /* regularization */
   aa_float safeguard_factor; /* safeguard tolerance factor */
-  aa_float max_weight_norm;         /* maximum norm of AA weights */
+  aa_float max_weight_norm;  /* maximum norm of AA weights */
 
   aa_float *x;     /* x input to map*/
   aa_float *f;     /* f(x) output of map */
