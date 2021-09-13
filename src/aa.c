@@ -283,7 +283,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     /* f += (1 - relaxation) * x_work */
     BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
   }
-  a->success = 1;
+  a->success = 1; /* this should be the only place we set success = 1 */
   TIME_TOC
   return aa_norm;
 }
@@ -343,7 +343,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
   aa_float aa_norm = 0;
   aa_int len = MIN(a->iter, a->mem);
-  a->success = 0;
+  a->success = 0; /* if we make an AA step we set this to 1 later */
   if (a->mem <= 0) {
     return aa_norm; /* 0 */
   }
