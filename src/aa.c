@@ -264,9 +264,10 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     return -aa_norm;
   }
 
+  /* here work = gamma, ie, the shifted weights */
   /* if solve was successful compute new point */
-  /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
 
+  /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
   /* first set f -= D * work */
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
