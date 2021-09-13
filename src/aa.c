@@ -27,6 +27,7 @@
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define FILL_MEMORY_BEFORE_SOLVE (1)
 
 #if PROFILING > 0
 
@@ -230,7 +231,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   return;
 }
 
-/* solves the system of equations to perform the aa update
+/* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
  */
 static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
@@ -340,23 +341,27 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
 
 aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
-  aa_float aa_norm;
+  aa_float aa_norm = 0;
   aa_int len = MIN(a->iter, a->mem);
   a->success = 0;
   if (a->mem <= 0) {
-    return 0;
+    return aa_norm; /* 0 */
   }
   if (a->iter == 0) {
     /* if first iteration then seed params for next iter */
     init_accel_params(x, f, a);
     a->iter++;
     TIME_TOC
-    return 0;
+    return aa_norm; /* 0 */
   }
   /* set various accel quantities */
   update_accel_params(x, f, a, len);
-  /* solve linear system, new point overwrites f if successful */
-  aa_norm = solve(f, a, len);
+
+  /* only perform solve steps when the memory is full */
+  if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
+    /* solve linear system, new point overwrites f if successful */
+    aa_norm = solve(f, a, len);
+  }
   a->iter++;
   TIME_TOC
   return aa_norm;

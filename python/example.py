@@ -46,7 +46,8 @@ for mem in mems:
   fs = []
   x = x_0.copy()
   aa_wrk = aa.AndersonAccelerator(dim, mem, True, regularization=1e-8,
-                                  relaxation=RELAXATION, verbosity=1)
+                                  relaxation=RELAXATION, verbosity=1,
+                                  max_weight_norm=1e6)
   for i in range(N):
       if i > 0: aa_wrk.apply(x, x_prev)
       x_prev = np.copy(x)
@@ -61,8 +62,9 @@ for mem in mems:
   print('Type-II acceleration, mem:', mem)
   fs = []
   x = x_0.copy()
-  aa_wrk = aa.AndersonAccelerator(dim, mem, False, regularization=1e-10,
-                                  relaxation=RELAXATION, verbosity=1)
+  aa_wrk = aa.AndersonAccelerator(dim, mem, False, regularization=1e-12,
+                                  relaxation=RELAXATION, verbosity=1,
+                                  max_weight_norm=1e6)
   for i in range(N):
       if i > 0: aa_wrk.apply(x, x_prev)
       x_prev = np.copy(x)

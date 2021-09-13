@@ -15,10 +15,11 @@ cdef extern from "../include/aa.h":
 cdef class AndersonAccelerator(object):
     cdef AaWork* _wrk
     cdef int _dim
-    def __cinit__(self, dim, mem, type1=False, regularization=1e-9,
-                  relaxation=1.0, safeguard_factor=2.0, max_weight_norm=1e4, 
+
+    def __cinit__(self, dim, mem, type1=False, regularization=1e-12,
+                  relaxation=1.0, safeguard_factor=1.0, max_weight_norm=1e6,
                   verbosity=0):
-        self._wrk = aa_init(dim, mem, type1, regularization, relaxation, 
+        self._wrk = aa_init(dim, mem, type1, regularization, relaxation,
                             safeguard_factor, max_weight_norm, verbosity)
         self._dim = dim
 
@@ -34,17 +35,17 @@ cdef class AndersonAccelerator(object):
         if not x.flags['C_CONTIGUOUS']:
             # Makes a contiguous copy of the numpy array.
             x = np.ascontiguousarray(x)
-        
+
         return f, x
- 
+
     def apply(self, f, x):
-        f, x = self._validate(f, x) 
+        f, x = self._validate(f, x)
         cdef double[::1] f_memview = f
         cdef double[::1] x_memview = x
         return aa_apply(&f_memview[0], &x_memview[0], self._wrk)
 
     def safeguard(self, f_new, x_new):
-        f_new , x_new = self._validate(f_new, x_new) 
+        f_new , x_new = self._validate(f_new, x_new)
         cdef double[::1] f_memview = f_new
         cdef double[::1] x_memview = x_new
         return aa_safeguard(&f_memview[0], &x_memview[0], self._wrk)
