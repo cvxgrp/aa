@@ -90,8 +90,8 @@ struct ACCEL_WORK {
 
   aa_float relaxation;          /* relaxation x and f, beta in some papers */
   aa_float regularization;      /* regularization */
-  aa_float safeguard_tolerance; /* safeguard tolerance factor */
-  aa_float max_aa_norm;         /* maximum norm of AA weights */
+  aa_float safeguard_factor; /* safeguard tolerance factor */
+  aa_float max_weight_norm;         /* maximum norm of AA weights */
 
   aa_float *x;     /* x input to map*/
   aa_float *f;     /* f(x) output of map */
@@ -251,7 +251,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
   /* info < 0 input error, input > 0 matrix is singular */
-  if (info != 0 || aa_norm >= a->max_aa_norm) {
+  if (info != 0 || aa_norm >= a->max_weight_norm) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
              a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
@@ -291,8 +291,8 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
  * API functions below this line, see aa.h for descriptions.
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_float safeguard_tolerance,
-                aa_float max_aa_norm, aa_int verbosity) {
+                aa_float relaxation, aa_float safeguard_factor,
+                aa_float max_weight_norm, aa_int verbosity) {
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -304,8 +304,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->mem = mem;
   a->regularization = regularization;
   a->relaxation = relaxation;
-  a->safeguard_tolerance = safeguard_tolerance;
-  a->max_aa_norm = max_aa_norm;
+  a->safeguard_factor = safeguard_factor;
+  a->max_weight_norm = max_weight_norm;
   a->success = 0;
   a->verbosity = verbosity;
   if (a->mem <= 0) {
@@ -378,7 +378,7 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
   /* norm_diff = || f_new - x_new || */
   norm_diff = BLAS(nrm2)(&bdim, a->work, &one);
   /* g = f - x */
-  if (norm_diff > a->safeguard_tolerance * a->norm_g) {
+  if (norm_diff > a->safeguard_factor * a->norm_g) {
     /* in this case we reject the AA step and reset */
     memcpy(f_new, a->f, a->dim * sizeof(aa_float));
     memcpy(x_new, a->x, a->dim * sizeof(aa_float));
