@@ -150,6 +150,7 @@ static void set_m(AaWork *a, aa_int len) {
 
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
 static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
+  TIME_TIC
   blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
   blas_int one = 1;
@@ -161,6 +162,7 @@ static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
   memcpy(a->g_prev, x, sizeof(aa_float) * a->dim);
   /* g_prev = x_prev - f_prev */
   BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g_prev, &one);
+  TIME_TOC
 }
 
 /* updates the workspace parameters for aa for this iteration */
@@ -215,7 +217,6 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 
   /* x, f correct here */
 
-  /* M correct here */
   memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
   /* g_prev set for next iter here */
 
@@ -290,6 +291,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
                 aa_float relaxation, aa_float safeguard_factor,
                 aa_float max_weight_norm, aa_int verbosity) {
+  TIME_TIC
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -332,6 +334,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   } else {
     a->x_work = 0;
   }
+  TIME_TOC
   return a;
 }
 
@@ -341,6 +344,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   aa_int len = MIN(a->iter, a->mem);
   a->success = 0; /* if we make an AA step we set this to 1 later */
   if (a->mem <= 0) {
+    TIME_TOC
     return aa_norm; /* 0 */
   }
   if (a->iter == 0) {
@@ -366,12 +370,14 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
 }
 
 aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
+  TIME_TIC
   blas_int bdim = (blas_int)a->dim;
   blas_int one = 1;
   aa_float neg_onef = -1.0;
   aa_float norm_diff;
   if (!a->success) {
     /* last AA update was not successful, no need for safeguarding */
+    TIME_TOC
     return 0;
   }
   /* work = x_new */
@@ -390,8 +396,10 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
              (int)a->iter, norm_diff, a->norm_g);
     }
     aa_reset(a);
+    TIME_TOC
     return -1;
   }
+  TIME_TOC
   return 0;
 }
 
