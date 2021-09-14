@@ -215,9 +215,6 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 
   /* x, f correct here */
 
-  /* set M = S'Y or Y'Y depending on type of aa used */
-  set_m(a, len);
-
   /* M correct here */
   memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
   /* g_prev set for next iter here */
@@ -358,6 +355,8 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
 
   /* only perform solve steps when the memory is full */
   if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
+    /* set M = S'Y or Y'Y depending on type of aa used */
+    set_m(a, len);
     /* solve linear system, new point overwrites f if successful */
     aa_norm = solve(f, a, len);
   }
