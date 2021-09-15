@@ -118,28 +118,37 @@ struct ACCEL_WORK {
   aa_float *x_work; /* workspace (= x) for when relaxation != 1.0 */
 };
 
+/* add regularization dependent on Y and S matrices */
+static aa_float compute_regularization(AaWork *a, aa_int len) {
+  /* typically type-I does better with higher regularization than type-II */
+  TIME_TIC
+  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
+  blas_int btotal = (blas_int)(a->dim * len), one = 1;
+  nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
+  nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
+  r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
+  if (a->verbosity > 2) {
+    printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n", a->iter,
+           len, nrm_y, nrm_s, r);
+  }
+  TIME_TOC
+  return r;
+}
+
 /* sets a->M to S'Y or Y'Y depending on type of aa used */
 /* M is len x len after this */
 static void set_m(AaWork *a, aa_int len) {
   TIME_TIC
   aa_int i;
-  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
-  blas_int bdim = (blas_int)(a->dim), one = 1;
-  blas_int blen = (blas_int)len, btotal = (blas_int)(a->dim * len);
-  aa_float onef = 1.0, zerof = 0.0;
+  blas_int bdim = (blas_int)(a->dim);
+  blas_int blen = (blas_int)len;
+  aa_float onef = 1.0, zerof = 0.0, r;
   /* if len < mem this only uses len cols */
   BLAS(gemm)
   ("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
    a->Y, &bdim, &zerof, a->M, &blen);
   if (a->regularization > 0) {
-    /* typically type-I does better with higher regularization than type-II */
-    nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
-    nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
-    r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
-    if (a->verbosity > 2) {
-      printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n",
-             a->iter, len, nrm_y, nrm_s, r);
-    }
+    r = compute_regularization(a, len);
     for (i = 0; i < len; ++i) {
       a->M[i + len * i] += r;
     }
@@ -227,6 +236,23 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   return;
 }
 
+/* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
+static void relax(aa_float *f, AaWork *a, aa_int len) {
+  TIME_TIC
+  /* x_work = x - S * work */
+  blas_int bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
+  aa_float onef = 1.0, neg_onef = -1.0;
+  aa_float one_m_relaxation = 1. - a->relaxation;
+  BLAS(gemv)
+  ("NoTrans", &bdim, &blen, &neg_onef, a->S, &bdim, a->work, &one, &onef,
+   a->x_work, &one);
+  /* f = relaxation * f */
+  BLAS(scal)(&blen, &a->relaxation, f, &one);
+  /* f += (1 - relaxation) * x_work */
+  BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
+  TIME_TOC
+}
+
 /* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
  */
@@ -234,12 +260,12 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
   aa_float onef = 1.0, zerof = 0.0, neg_onef = -1.0, aa_norm;
-  aa_float one_m_relaxation = 1. - a->relaxation;
 
   /* work = S'g or Y'g */
   BLAS(gemv)
   ("Trans", &bdim, &blen, &onef, a->type1 ? a->S : a->Y, &bdim, a->g, &one,
    &zerof, a->work, &one);
+
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
@@ -247,6 +273,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
+
   /* info < 0 input error, input > 0 matrix is singular */
   if (info != 0 || aa_norm >= a->max_weight_norm) {
     if (a->verbosity > 0) {
@@ -260,10 +287,9 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     return -aa_norm;
   }
 
-  /* here work = gamma, ie, the shifted weights */
+  /* here work = gamma, ie, the correct AA shifted weights */
   /* if solve was successful compute new point */
 
-  /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
   /* first set f -= D * work */
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
@@ -271,15 +297,9 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
 
   /* if relaxation is not 1 then need to incorporate */
   if (a->relaxation != 1.0) {
-    /* x_work = x - S * work */
-    BLAS(gemv)
-    ("NoTrans", &bdim, &blen, &neg_onef, a->S, &bdim, a->work, &one, &onef,
-     a->x_work, &one);
-    /* f = relaxation * f */
-    BLAS(scal)(&blen, &a->relaxation, f, &one);
-    /* f += (1 - relaxation) * x_work */
-    BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
+    relax(f, a, len);
   }
+
   a->success = 1; /* this should be the only place we set success = 1 */
   TIME_TOC
   return aa_norm;

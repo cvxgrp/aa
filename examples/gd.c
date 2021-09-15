@@ -11,7 +11,7 @@
 #define DIM (1000)
 #define MEM (10)
 #define REGULARIZATION (1e-12)
-#define SAFEGUARD_TOLERANCE (2.0)
+#define SAFEGUARD_TOLERANCE (1.0)
 #define MAX_AA_NORM (1e4)
 #define RELAXATION (1.0)
 #define ITERS (30000)
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
   printf("Usage: 'out/gd memory type1 dimension step_size seed iters "
          "regularization relaxation safeguard_tolerance max_aa_norm'\n");
 
-  switch (argc-1) {
+  switch (argc - 1) {
   case 10:
     max_aa_norm = atof(argv[10]);
   case 9:
