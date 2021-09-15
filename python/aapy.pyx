@@ -6,7 +6,7 @@ cdef extern from "../src/aa.c":
 cdef extern from "../include/aa.h":
     ctypedef struct AaWork:
         pass
-    AaWork *aa_init(int, int, int, float, float, float, float, int)
+    AaWork *aa_init(int, int, float, int)
     double aa_apply(double*, const double*, AaWork*)
     int aa_safeguard(double*, double*, AaWork*)
     void aa_reset(AaWork*)
@@ -16,11 +16,8 @@ cdef class AndersonAccelerator(object):
     cdef AaWork* _wrk
     cdef int _dim
 
-    def __cinit__(self, dim, mem, type1=False, regularization=1e-12,
-                  relaxation=1.0, safeguard_factor=1.0, max_weight_norm=1e6,
-                  verbosity=0):
-        self._wrk = aa_init(dim, mem, type1, regularization, relaxation,
-                            safeguard_factor, max_weight_norm, verbosity)
+    def __cinit__(self, dim, mem=50, safeguard_factor=2.0, verbosity=0):
+        self._wrk = aa_init(dim, mem, safeguard_factor, verbosity)
         self._dim = dim
 
     def _validate(self, f, x):

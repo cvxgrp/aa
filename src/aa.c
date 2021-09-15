@@ -82,17 +82,13 @@ aa_float toc(const char *str, timer *t) {
 
 /* contains the necessary parameters to perform aa at each step */
 struct ACCEL_WORK {
-  aa_int type1;     /* bool, if true type 1 aa otherwise type 2 */
   aa_int mem;       /* aa memory */
   aa_int dim;       /* variable dimension */
   aa_int iter;      /* current iteration */
   aa_int verbosity; /* verbosity level, 0 is no printing */
   aa_int success;   /* was the last AA step successful or not */
 
-  aa_float relaxation;       /* relaxation x and f, beta in some papers */
-  aa_float regularization;   /* regularization */
   aa_float safeguard_factor; /* safeguard tolerance factor */
-  aa_float max_weight_norm;  /* maximum norm of AA weights */
 
   aa_float *x;     /* x input to map*/
   aa_float *f;     /* f(x) output of map */
@@ -113,9 +109,12 @@ struct ACCEL_WORK {
 
   /* workspace variables */
   aa_float *work; /* scratch space */
-  blas_int *ipiv; /* permutation variable, not used after solve */
 
-  aa_float *x_work; /* workspace (= x) for when relaxation != 1.0 */
+  /* SVD workspace */
+  aa_float *sigs;
+  aa_float *swork;
+  blas_int *iwork;
+  blas_int lwork;
 };
 
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
@@ -180,11 +179,6 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   memcpy(a->f, f, sizeof(aa_float) * a->dim);
   memcpy(a->x, x, sizeof(aa_float) * a->dim);
 
-  /* workspace for when relaxation != 1.0 */
-  if (a->x_work) {
-    memcpy(a->x_work, x, sizeof(aa_float) * a->dim);
-  }
-
   /* x, f correct here */
 
   memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
@@ -197,51 +191,43 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   return;
 }
 
+
+static void init_gelsd(AaWork *a) {
+  aa_float worksize;
+  blas_int bmem = a->mem, bdim = a->dim;
+  blas_int neg_one = -1, one = 1, rank, info;
+  aa_float neg_onef = -1;
+  a->sigs = (aa_float *)malloc(a->mem * sizeof(aa_float));
+  BLAS(gelsd)(&bdim, &bmem, &one, a->Y, &bdim, a->work, &bdim, a->sigs,
+              &neg_onef, &rank, &worksize, &neg_one, &neg_one, &info);
+  a->lwork = (blas_int)worksize;
+  a->swork = (aa_float *)malloc(a->lwork * sizeof(aa_float));
+  a->iwork = (blas_int *)malloc(a->lwork * sizeof(blas_int));
+}
+
 /* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
  */
 static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
-  blas_int neg_one = -1;
   aa_float onef = 1.0, neg_onef = -1.0, aa_norm;
-  aa_float one_m_relaxation = 1. - a->relaxation;
-
   blas_int rank;
-  blas_int lwork;
 
   memcpy(a->work, a->g, a->dim * sizeof(aa_float));
-
-  aa_float *s = (aa_float *)calloc(len, sizeof(aa_float));
-  aa_float rcond = -1;
-
-  aa_float *mat = (aa_float *)malloc(a->dim * len * sizeof(aa_float));
-  memcpy(mat, a->Y, a->dim * len * sizeof(aa_float));
-
-  aa_float worksize;
-  BLAS(gelsd)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, s, &rcond,
-              &rank, &worksize, &neg_one, &neg_one, &info);
-  lwork = (blas_int)worksize;
-  aa_float *work = (aa_float *)malloc(lwork * sizeof(aa_float));
-  blas_int *iwork = (blas_int *)malloc(lwork * sizeof(blas_int));
-  BLAS(gelsd)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, s, &rcond,
-              &rank, work, &lwork, iwork, &info);
-
-  free(s);
-  free(mat);
-  free(work);
-  free(iwork);
+  BLAS(gelsd)(&bdim, &blen, &one, a->Y, &bdim, a->work, &bdim, a->sigs,
+              &neg_onef, &rank, a->swork, &a->lwork, a->iwork, &info);
 
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-           a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
+           2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
   /* info < 0 input error, input > 0 matrix is singular */
-  if (info != 0 || aa_norm >= a->max_weight_norm) {
+  if (info != 0) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-             a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
+             2, (int)a->iter, (int)len, (int)info, aa_norm);
     }
     a->success = 0;
     /* reset aa for stability */
@@ -253,23 +239,10 @@ static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
   /* here work = gamma, ie, the shifted weights */
   /* if solve was successful compute new point */
 
-  /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
-  /* first set f -= D * work */
+  /* f -= D * work */
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
    &one);
-
-  /* if relaxation is not 1 then need to incorporate */
-  if (a->relaxation != 1.0) {
-    /* x_work = x - S * work */
-    BLAS(gemv)
-    ("NoTrans", &bdim, &blen, &neg_onef, a->S, &bdim, a->work, &one, &onef,
-     a->x_work, &one);
-    /* f = relaxation * f */
-    BLAS(scal)(&blen, &a->relaxation, f, &one);
-    /* f += (1 - relaxation) * x_work */
-    BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
-  }
   a->success = 1; /* this should be the only place we set success = 1 */
   TIME_TOC
   return aa_norm;
@@ -278,23 +251,18 @@ static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
 /*
  * API functions below this line, see aa.h for descriptions.
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_float safeguard_factor,
-                aa_float max_weight_norm, aa_int verbosity) {
+AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
+                aa_int verbosity) {
   TIME_TIC
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
     return (void *)0;
   }
-  a->type1 = type1;
   a->iter = 0;
   a->dim = dim;
   a->mem = mem;
-  a->regularization = regularization;
-  a->relaxation = relaxation;
   a->safeguard_factor = safeguard_factor;
-  a->max_weight_norm = max_weight_norm;
   a->success = 0;
   a->verbosity = verbosity;
   if (a->mem <= 0) {
@@ -317,13 +285,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
   a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
-  a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
-
-  if (relaxation != 1.0) {
-    a->x_work = (aa_float *)calloc(a->dim, sizeof(aa_float));
-  } else {
-    a->x_work = 0;
-  }
+  init_gelsd(a);
   TIME_TOC
   return a;
 }
@@ -348,7 +310,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   update_accel_params(x, f, a, len);
 
   /* only perform solve steps when the memory is full */
-  if (0 || (a->iter > 1 && (a->iter - 1) % a->mem == 0)) {
+  if (a->iter % a->mem == 0) { /* iter > 0 at this point */
     /* solve linear system, new point overwrites f if successful */
     aa_norm = solve_with_gelsd(f, a, len);
   }
@@ -405,10 +367,9 @@ void aa_finish(AaWork *a) {
     free(a->D);
     free(a->M);
     free(a->work);
-    free(a->ipiv);
-    if (a->x_work) {
-      free(a->x_work);
-    }
+    free(a->swork);
+    free(a->iwork);
+    free(a->sigs);
     free(a);
   }
   return;
