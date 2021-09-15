@@ -58,9 +58,9 @@ void BLAS(gemm)(const char *transa, const char *transb, blas_int *m,
                 aa_float *c, blas_int *ldc);
 void BLAS(scal)(const blas_int *n, const aa_float *a, aa_float *x,
                 const blas_int *incx);
-void BLAS(gelsy)(blas_int *m, blas_int *n, blas_int *nrhs, aa_float *a,
-                 blas_int *lda, aa_float *b, blas_int *ldb, blas_int *jpvt,
-                 aa_float *rcond, blas_int *rank, aa_float *work, blas_int *lwork, blas_int *info);
+void BLAS(gelsd)(blas_int *m, blas_int *n, blas_int *nrhs, aa_float *a,
+                 blas_int *lda, aa_float *b, blas_int *ldb, aa_float *s,
+                 aa_float *rcond, blas_int *rank, aa_float *work, blas_int *lwork, blas_int *iwork,blas_int *info);
 
 #ifdef __cplusplus
 }

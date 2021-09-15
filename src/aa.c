@@ -200,7 +200,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 /* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
  */
-static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
+static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
   blas_int neg_one = -1;
@@ -212,19 +212,25 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
 
   memcpy(a->work, a->g, a->dim * sizeof(aa_float));
 
-  blas_int *jpvt = (blas_int *)calloc(len, sizeof(blas_int));
-  aa_float rcond = 1e-6;
+  aa_float *s = (aa_float *)calloc(len, sizeof(aa_float));
+  aa_float rcond = -1;
 
   aa_float *mat = (aa_float *)malloc(a->dim * len * sizeof(aa_float));
   memcpy(mat, a->Y, a->dim * len * sizeof(aa_float));
 
   aa_float worksize;
-  BLAS(gelsy)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond,
-              &rank, &worksize, &neg_one, &info);
+  BLAS(gelsd)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, s, &rcond,
+              &rank, &worksize, &neg_one, &neg_one, &info);
   lwork = (blas_int)worksize;
   aa_float *work = (aa_float *)malloc(lwork * sizeof(aa_float));
-  BLAS(gelsy)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond,
-              &rank, work, &lwork, &info);
+  blas_int *iwork = (blas_int *)malloc(lwork * sizeof(blas_int));
+  BLAS(gelsd)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, s, &rcond,
+              &rank, work, &lwork, iwork, &info);
+
+  free(s);
+  free(mat);
+  free(work);
+  free(iwork);
 
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
@@ -240,9 +246,6 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
     a->success = 0;
     /* reset aa for stability */
     aa_reset(a);
-    free(jpvt);
-    free(mat);
-    free(work);
     TIME_TOC
     return -aa_norm;
   }
@@ -345,9 +348,9 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   update_accel_params(x, f, a, len);
 
   /* only perform solve steps when the memory is full */
-  if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
+  if (0 || (a->iter > 1 && (a->iter - 1) % a->mem == 0)) {
     /* solve linear system, new point overwrites f if successful */
-    aa_norm = solve_with_gelsy(f, a, len);
+    aa_norm = solve_with_gelsd(f, a, len);
   }
   a->iter++;
   TIME_TOC
