@@ -27,6 +27,7 @@
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define FILL_MEMORY_BEFORE_SOLVE (1)
 
 #if PROFILING > 0
 
@@ -88,10 +89,10 @@ struct ACCEL_WORK {
   aa_int verbosity; /* verbosity level, 0 is no printing */
   aa_int success;   /* was the last AA step successful or not */
 
-  aa_float relaxation;          /* relaxation x and f, beta in some papers */
-  aa_float regularization;      /* regularization */
-  aa_float safeguard_tolerance; /* safeguard tolerance factor */
-  aa_float max_aa_norm;         /* maximum norm of AA weights */
+  aa_float relaxation;       /* relaxation x and f, beta in some papers */
+  aa_float regularization;   /* regularization */
+  aa_float safeguard_factor; /* safeguard tolerance factor */
+  aa_float max_weight_norm;  /* maximum norm of AA weights */
 
   aa_float *x;     /* x input to map*/
   aa_float *f;     /* f(x) output of map */
@@ -119,6 +120,7 @@ struct ACCEL_WORK {
 
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
 static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
+  TIME_TIC
   blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
   blas_int one = 1;
@@ -130,6 +132,7 @@ static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
   memcpy(a->g_prev, x, sizeof(aa_float) * a->dim);
   /* g_prev = x_prev - f_prev */
   BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g_prev, &one);
+  TIME_TOC
 }
 
 /* updates the workspace parameters for aa for this iteration */
@@ -184,10 +187,6 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 
   /* x, f correct here */
 
-  /* set M = S'Y or Y'Y depending on type of aa used */
-  /* set_m(a, len); */
-
-  /* M correct here */
   memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
   /* g_prev set for next iter here */
 
@@ -198,7 +197,7 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   return;
 }
 
-/* solves the system of equations to perform the aa update
+/* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
  */
 static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
@@ -233,7 +232,7 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
   /* info < 0 input error, input > 0 matrix is singular */
-  if (info != 0 || aa_norm >= a->max_aa_norm) {
+  if (info != 0 || aa_norm >= a->max_weight_norm) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
              a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
@@ -248,9 +247,10 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
     return -aa_norm;
   }
 
+  /* here work = gamma, ie, the shifted weights */
   /* if solve was successful compute new point */
-  /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
 
+  /* f = (1-relaxation) * \sum_i a_i x_i + relaxation * \sum_i a_i f_i */
   /* first set f -= D * work */
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
@@ -267,7 +267,7 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
     /* f += (1 - relaxation) * x_work */
     BLAS(axpy)(&blen, &one_m_relaxation, a->x_work, &one, f, &one);
   }
-  a->success = 1;
+  a->success = 1; /* this should be the only place we set success = 1 */
   TIME_TOC
   return aa_norm;
 }
@@ -276,8 +276,9 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
  * API functions below this line, see aa.h for descriptions.
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_float safeguard_tolerance,
-                aa_float max_aa_norm, aa_int verbosity) {
+                aa_float relaxation, aa_float safeguard_factor,
+                aa_float max_weight_norm, aa_int verbosity) {
+  TIME_TIC
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
@@ -289,8 +290,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->mem = mem;
   a->regularization = regularization;
   a->relaxation = relaxation;
-  a->safeguard_tolerance = safeguard_tolerance;
-  a->max_aa_norm = max_aa_norm;
+  a->safeguard_factor = safeguard_factor;
+  a->max_weight_norm = max_weight_norm;
   a->success = 0;
   a->verbosity = verbosity;
   if (a->mem <= 0) {
@@ -320,41 +321,48 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   } else {
     a->x_work = 0;
   }
+  TIME_TOC
   return a;
 }
 
 aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   TIME_TIC
-  aa_float aa_norm;
+  aa_float aa_norm = 0;
   aa_int len = MIN(a->iter, a->mem);
-  a->success = 0;
+  a->success = 0; /* if we make an AA step we set this to 1 later */
   if (a->mem <= 0) {
-    return 0;
+    TIME_TOC
+    return aa_norm; /* 0 */
   }
   if (a->iter == 0) {
     /* if first iteration then seed params for next iter */
     init_accel_params(x, f, a);
     a->iter++;
     TIME_TOC
-    return 0;
+    return aa_norm; /* 0 */
   }
   /* set various accel quantities */
   update_accel_params(x, f, a, len);
-  /* solve linear system, new point overwrites f if successful */
-  /*aa_norm = solve(f, a, len); */
-  aa_norm = solve_with_gelsy(f, a, len);
+
+  /* only perform solve steps when the memory is full */
+  if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
+    /* solve linear system, new point overwrites f if successful */
+    aa_norm = solve_with_gelsy(f, a, len);
+  }
   a->iter++;
   TIME_TOC
   return aa_norm;
 }
 
 aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
+  TIME_TIC
   blas_int bdim = (blas_int)a->dim;
   blas_int one = 1;
   aa_float neg_onef = -1.0;
   aa_float norm_diff;
   if (!a->success) {
     /* last AA update was not successful, no need for safeguarding */
+    TIME_TOC
     return 0;
   }
   /* work = x_new */
@@ -364,7 +372,7 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
   /* norm_diff = || f_new - x_new || */
   norm_diff = BLAS(nrm2)(&bdim, a->work, &one);
   /* g = f - x */
-  if (norm_diff > a->safeguard_tolerance * a->norm_g) {
+  if (norm_diff > a->safeguard_factor * a->norm_g) {
     /* in this case we reject the AA step and reset */
     memcpy(f_new, a->f, a->dim * sizeof(aa_float));
     memcpy(x_new, a->x, a->dim * sizeof(aa_float));
@@ -373,8 +381,10 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
              (int)a->iter, norm_diff, a->norm_g);
     }
     aa_reset(a);
+    TIME_TOC
     return -1;
   }
+  TIME_TOC
   return 0;
 }
 

@@ -35,7 +35,7 @@ for i in range(N):
     x -= step * (Q.dot(x) - q)
     fs.append(f(x) - f_star)
     if i % 1000 == 0:
-        print('i: ', i,' f - f^*: ', f(x) - f_star)
+        print('i: ', i,' f - f^*: ', np.abs(f(x) - f_star))
 
 results['No accel'] = fs
 
@@ -46,34 +46,38 @@ for mem in mems:
   fs = []
   x = x_0.copy()
   aa_wrk = aa.AndersonAccelerator(dim, mem, True, regularization=1e-8,
-                                  relaxation=RELAXATION)
+                                  relaxation=RELAXATION, verbosity=1,
+                                  max_weight_norm=1e6)
   for i in range(N):
+      if i > 0: aa_wrk.apply(x, x_prev)
       x_prev = np.copy(x)
       x -= step * (Q.dot(x) - q)
-      aa_wrk.apply(x, x_prev)
+      aa_wrk.safeguard(x, x_prev)
       fs.append(f(x) - f_star)
       if i % 1000 == 0:
-          print('i: ', i,' f - f^*: ', f(x) - f_star)
+          print('i: ', i,' f - f^*: ', np.abs(f(x) - f_star))
 
   results[f'AA-I {mem}'] = fs
 
   print('Type-II acceleration, mem:', mem)
   fs = []
   x = x_0.copy()
-  aa_wrk = aa.AndersonAccelerator(dim, mem, False, regularization=1e-10,
-                                  relaxation=RELAXATION)
+  aa_wrk = aa.AndersonAccelerator(dim, mem, False, regularization=1e-12,
+                                  relaxation=RELAXATION, verbosity=1,
+                                  max_weight_norm=1e6)
   for i in range(N):
+      if i > 0: aa_wrk.apply(x, x_prev)
       x_prev = np.copy(x)
       x -= step * (Q.dot(x) - q)
-      aa_wrk.apply(x, x_prev)
+      aa_wrk.safeguard(x, x_prev)
       fs.append(f(x) - f_star)
       if i % 1000 == 0:
-          print('i: ', i,' f - f^*: ', f(x) - f_star)
+          print('i: ', i,' f - f^*: ', np.abs(f(x) - f_star))
 
   results[f'AA-II {mem}'] = fs
 
-# for k,v in results.items():
-#     plt.semilogy(v, label=k)
-# 
-# plt.legend()
-# plt.show()
+for k,v in results.items():
+    plt.semilogy(v, label=k)
+
+plt.legend()
+plt.show()
