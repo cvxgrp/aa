@@ -122,14 +122,12 @@ struct ACCEL_WORK {
 static aa_float compute_regularization(AaWork *a, aa_int len) {
   /* typically type-I does better with higher regularization than type-II */
   TIME_TIC
-  aa_float r, nrm_y, nrm_s; /* add r to diags for regularization */
-  blas_int btotal = (blas_int)(a->dim * len), one = 1;
-  nrm_y = BLAS(nrm2)(&btotal, a->Y, &one);
-  nrm_s = BLAS(nrm2)(&btotal, a->S, &one);
-  r = a->regularization * (nrm_y * nrm_y + nrm_s * nrm_s);
+  aa_float r, nrm_m;
+  blas_int btotal = (blas_int)(len * len), one = 1;
+  nrm_m = BLAS(nrm2)(&btotal, a->M, &one);
+  r = a->regularization * nrm_m;
   if (a->verbosity > 2) {
-    printf("iter: %i, len: %i, norm: Y %.2e, norm: S %.2e, r: %.2e\n", a->iter,
-           len, nrm_y, nrm_s, r);
+    printf("iter: %i, norm: M %.2e, r: %.2e\n", a->iter, nrm_m, r);
   }
   TIME_TOC
   return r;
