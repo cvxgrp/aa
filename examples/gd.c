@@ -8,7 +8,7 @@
 /* default parameters */
 #define SEED (1234)
 #define DIM (1000)
-#define MEM (50)
+#define MEM (5)
 #define SAFEGUARD_TOLERANCE (2.0)
 #define ITERS (30000)
 #define STEPSIZE (0.001)

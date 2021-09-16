@@ -111,6 +111,7 @@ struct ACCEL_WORK {
   aa_float *work; /* scratch space */
 
   /* SVD workspace */
+  aa_float *Y_work;
   aa_float *sigs;
   aa_float *swork;
   blas_int *iwork;
@@ -146,18 +147,14 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 
   /* g = x */
   memcpy(a->g, x, sizeof(aa_float) * a->dim);
-  /* s = x */
-  memcpy(a->s, x, sizeof(aa_float) * a->dim);
   /* d = f */
   memcpy(a->d, f, sizeof(aa_float) * a->dim);
   /* g =  x - f */
   BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g, &one);
-  /* s = x - x_prev */
-  BLAS(axpy)(&bdim, &neg_onef, a->x, &one, a->s, &one);
   /* d = f - f_prev */
   BLAS(axpy)(&bdim, &neg_onef, a->f, &one, a->d, &one);
 
-  /* g, s, d correct here */
+  /* g, d correct here */
 
   /* y = g */
   memcpy(a->y, a->g, sizeof(aa_float) * a->dim);
@@ -168,12 +165,10 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 
   /* copy y into idx col of Y */
   memcpy(&(a->Y[idx * a->dim]), a->y, sizeof(aa_float) * a->dim);
-  /* copy s into idx col of S */
-  memcpy(&(a->S[idx * a->dim]), a->s, sizeof(aa_float) * a->dim);
   /* copy d into idx col of D */
   memcpy(&(a->D[idx * a->dim]), a->d, sizeof(aa_float) * a->dim);
 
-  /* Y, S, D correct here */
+  /* Y, D correct here */
 
   /* set a->f and a->x for next iter (x_prev and f_prev) */
   memcpy(a->f, f, sizeof(aa_float) * a->dim);
@@ -197,6 +192,7 @@ static void init_gelsd(AaWork *a) {
   blas_int bmem = a->mem, bdim = a->dim;
   blas_int neg_one = -1, one = 1, rank, info;
   aa_float neg_onef = -1;
+  a->Y_work = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
   a->sigs = (aa_float *)malloc(a->mem * sizeof(aa_float));
   BLAS(gelsd)(&bdim, &bmem, &one, a->Y, &bdim, a->work, &bdim, a->sigs,
               &neg_onef, &rank, &worksize, &neg_one, &neg_one, &info);
@@ -214,8 +210,10 @@ static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
   aa_float onef = 1.0, neg_onef = -1.0, aa_norm;
   blas_int rank;
 
+
+  memcpy(a->Y_work, a->Y, a->dim * len * sizeof(aa_float));
   memcpy(a->work, a->g, a->dim * sizeof(aa_float));
-  BLAS(gelsd)(&bdim, &blen, &one, a->Y, &bdim, a->work, &bdim, a->sigs,
+  BLAS(gelsd)(&bdim, &blen, &one, a->Y_work, &bdim, a->work, &bdim, a->sigs,
               &neg_onef, &rank, a->swork, &a->lwork, a->iwork, &info);
 
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
@@ -238,7 +236,6 @@ static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
 
   /* here work = gamma, ie, the shifted weights */
   /* if solve was successful compute new point */
-
   /* f -= D * work */
   BLAS(gemv)
   ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
@@ -276,11 +273,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
   a->g_prev = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
   a->y = (aa_float *)calloc(a->dim, sizeof(aa_float));
-  a->s = (aa_float *)calloc(a->dim, sizeof(aa_float));
   a->d = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
   a->Y = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
-  a->S = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
@@ -310,10 +305,11 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   update_accel_params(x, f, a, len);
 
   /* only perform solve steps when the memory is full */
-  if (a->iter % a->mem == 0) { /* iter > 0 at this point */
+  if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
     /* solve linear system, new point overwrites f if successful */
     aa_norm = solve_with_gelsd(f, a, len);
   }
+
   a->iter++;
   TIME_TOC
   return aa_norm;
@@ -360,12 +356,11 @@ void aa_finish(AaWork *a) {
     free(a->g);
     free(a->g_prev);
     free(a->y);
-    free(a->s);
     free(a->d);
     free(a->Y);
-    free(a->S);
     free(a->D);
     free(a->M);
+    free(a->Y_work);
     free(a->work);
     free(a->swork);
     free(a->iwork);
