@@ -110,7 +110,6 @@ struct ACCEL_WORK {
   /* workspace variables */
   aa_float *work; /* scratch space */
   blas_int *ipiv; /* permutation variable, not used after solve */
-
 };
 
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
@@ -181,6 +180,101 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   return;
 }
 
+static void qr_factorize(AaWork *a, aa_int len) {
+  TIME_TIC
+  aa_int i;
+  blas_int blen = (blas_int)len;
+  blas_int bdim = (blas_int)a->dim;
+  blas_int neg_one = -1;
+  blas_int info;
+  blas_int lwork;
+  aa_float worksize;
+  aa_float *work;
+  aa_float *tau = aa_malloc(len * sizeof(aa_float));
+  aa_float *Q = aa_malloc(a->dim * len * sizeof(aa_float));
+  memcpy(Q, a->Y, sizeof(aa_float) * a->dim * len);
+  BLAS(geqrf)(&bdim, &bmem, Q, &bdim, tau, &worksize, &negOne, &info);
+  lwork = (blas_int)worksize;
+  work = aa_malloc(lwork * sizeof(aa_float));
+  BLAS(geqrf)(&bdim, &bmem, Q, &bdim, tau, work, &lwork, &info);
+  aa_free(work);
+  aa_free(tau);
+  TIME_TOC
+  return;
+}
+
+static void update_qr_factorization(AaWork *a, aa_int idx, aa_int len) {
+  TIME_TIC
+  aa_float *R = a->R;
+  aa_float *dy = a->dy;
+  blas_int one = 1;
+  blas_int bmem = (blas_int)a->mem;
+  blas_int bdim = (blas_int)a->dim;
+  aa_float zerof = 0.0;
+  aa_float onef = 1.0;
+  aa_float negOnef = -1.0;
+  aa_int i;
+
+  /* Givens rotation workspace */
+  aa_float nrm_dy;
+  aa_float c;
+  aa_float s;
+
+  /* Y_prev = Q R */
+
+  /* work = Q' * dy = R^-T * Y_prev' * dy, size dim: col of R */
+  BLAS(gemv)
+  ("Trans", &bdim, &bk, &onef, a->Y_prev, &bdim, dy, &one, &zerof, a->work, &one);
+  BLAS(trsv)("Upper", "Trans", "NotUnitDiag", &bk, a->R, &bk, a->work, &one);
+  
+  /* a->work contains new column of R */
+
+  /* dy := dy - Q * w = dy - dF * R^-1 w, size m: col of Q */
+  //TODO preserve work since it gets overwritten here
+  BLAS(trsv)("Upper", "NoTrans", "NotUnitDiag", &bk, a->R, &bk, a->work, &one);
+  BLAS(gemv)
+  ("NoTrans", &bdim, &bk, &negOnef, a->dFold, &bdim, a->work, &one, &onef, u, &one);
+  
+  /* R col += work */
+  addScaledArray(&(R[idx * len]), a->work, len, 1.0);
+
+  memset(a->bot_row, 0, a->dim * sizeof(aa_float));
+  a->bot_row[idx] = BLAS(nrm2)(&bdim, dy, &one); /* norm dy */
+  /* Givens rotations, start with fake bottom row of R, extra col of Q */
+  aa_int ridx = len * idx + len - 1;
+  aa_float r1 = R[ridx];
+  BLAS(rotg)(&r1, &(a->bot_row[idx]), &c, &s);
+  /* note the non-unit stride (inc) here indicates rows */
+  BLAS(rot)(&bk, &(R[len - 1]), &bk, bot_row, &one, &c, &s);
+
+  /* Walk up the spike, R finishes upper Hessenberg */
+  for (i = len; i > idx + 1; --i) {
+    aa_int ridx = len * idx + i - 1;
+    aa_float r1 = R[ridx - 1];
+    aa_float r2 = R[ridx];
+    BLAS(rotg)(&(r1), &(r2), &c, &s);
+    /* note the non-unit stride (inc) here indicates rows */
+    BLAS(rot)(&bk, &(R[i - 2]), &bk, &(R[i - 1]), &bk, &c, &s);
+  }
+
+  /* Walk down the sub-diagonal, R finishes upper triangular */
+  for (i = idx + 1; i < len - 1; ++i) {
+    aa_int ridx = len * i + i;
+    aa_float r1 = R[ridx];
+    aa_float r2 = R[ridx + 1];
+    BLAS(rotg)(&r1, &r2, &c, &s);
+    /* note the non-unit stride (inc) here indicates rows */
+    BLAS(rot)(&bk, &(R[i]), &bk, &(R[i + 1]), &bk, &c, &s);
+  }
+
+  /* Finish fake bottom row of R, extra col of Q */
+  BLAS(rotg)(&(R[len * len - 1]), &(a->bot_row[len - 1]), &c, &s);
+  aa_free(a->bot_row);
+  TIME_TOC
+  return;
+}
+
+
 /* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
  */
@@ -202,17 +296,19 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
   memcpy(mat, a->Y, a->dim * len * sizeof(aa_float));
 
   aa_float worksize;
-  BLAS(gelsy)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond,
-              &rank, &worksize, &neg_one, &info);
+  BLAS(gelsy)
+  (&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond, &rank,
+   &worksize, &neg_one, &info);
   lwork = (blas_int)worksize;
   aa_float *work = (aa_float *)malloc(lwork * sizeof(aa_float));
-  BLAS(gelsy)(&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond,
-              &rank, work, &lwork, &info);
+  BLAS(gelsy)
+  (&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond, &rank, work,
+   &lwork, &info);
 
   aa_norm = BLAS(nrm2)(&blen, a->work, &one);
   if (a->verbosity > 1) {
-    printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-           2, (int)a->iter, (int)len, (int)info, aa_norm);
+    printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n", 2,
+           (int)a->iter, (int)len, (int)info, aa_norm);
   }
   /* info < 0 input error, input > 0 matrix is singular */
   if (info != 0) {
