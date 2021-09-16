@@ -31,9 +31,8 @@ typedef struct ACCEL_WORK AaWork;
  * @return pointer to AA workspace
  *
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_float safeguard_factor,
-                aa_float max_weight_norm, aa_int verbosity);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
+                aa_int verbosity);
 
 /**
  * Apply Anderson Acceleration. The usage pattern should be as follows:

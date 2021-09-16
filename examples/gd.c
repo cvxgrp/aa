@@ -7,13 +7,9 @@
 
 /* default parameters */
 #define SEED (1234)
-#define TYPE1 (0)
 #define DIM (1000)
-#define MEM (10)
-#define REGULARIZATION (1e-12)
+#define MEM (5)
 #define SAFEGUARD_TOLERANCE (2.0)
-#define MAX_AA_NORM (1e4)
-#define RELAXATION (1.0)
 #define ITERS (30000)
 #define STEPSIZE (0.001)
 #define PRINT_INTERVAL (500)
@@ -29,14 +25,11 @@ static aa_float rand_float(void) {
  *
  */
 int main(int argc, char **argv) {
-  aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
+  aa_int n = DIM, iters = ITERS, memory = MEM, seed = SEED;
   aa_int i, one = 1;
   aa_int verbosity = VERBOSITY;
   aa_float neg_step_size = -STEPSIZE;
-  aa_float regularization = REGULARIZATION;
-  aa_float relaxation = RELAXATION;
   aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
-  aa_float max_aa_norm = MAX_AA_NORM;
   aa_float err;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
 
@@ -44,24 +37,16 @@ int main(int argc, char **argv) {
          "regularization relaxation safeguard_tolerance max_aa_norm'\n");
 
   switch (argc-1) {
-  case 10:
-    max_aa_norm = atof(argv[10]);
-  case 9:
-    safeguard_tolerance = atof(argv[9]);
-  case 8:
-    relaxation = atof(argv[8]);
-  case 7:
-    regularization = atof(argv[7]);
   case 6:
-    iters = atoi(argv[6]);
+    safeguard_tolerance = atof(argv[6]);
   case 5:
-    seed = atoi(argv[5]);
+    iters = atoi(argv[5]);
   case 4:
-    neg_step_size = -atof(argv[4]);
+    seed = atoi(argv[4]);
   case 3:
-    n = atoi(argv[3]);
+    neg_step_size = -atof(argv[3]);
   case 2:
-    type1 = atoi(argv[2]);
+    n = atoi(argv[2]);
   case 1:
     memory = atoi(argv[1]);
     break;
@@ -92,8 +77,7 @@ int main(int argc, char **argv) {
     Q[i + i * n] += 1e-6;
   }
 
-  AaWork *a = aa_init(n, memory, type1, regularization, relaxation,
-                      safeguard_tolerance, max_aa_norm, verbosity);
+  AaWork *a = aa_init(n, memory, safeguard_tolerance, verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       aa_apply(x, xprev, a);
