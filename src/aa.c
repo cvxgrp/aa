@@ -196,7 +196,7 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
   memcpy(a->work, a->g, a->dim * sizeof(aa_float));
 
   blas_int *jpvt = (blas_int *)calloc(len, sizeof(blas_int));
-  aa_float rcond = 1e-6;
+  aa_float rcond = -1;
 
   aa_float *mat = (aa_float *)malloc(a->dim * len * sizeof(aa_float));
   memcpy(mat, a->Y, a->dim * len * sizeof(aa_float));
