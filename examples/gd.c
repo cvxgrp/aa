@@ -9,7 +9,7 @@
 #define SEED (1234)
 #define DIM (1000)
 #define MEM (5)
-#define SAFEGUARD_TOLERANCE (1.0)
+#define SAFEGUARD_TOLERANCE (2.0)
 #define ITERS (30000)
 #define STEPSIZE (0.001)
 #define PRINT_INTERVAL (500)
