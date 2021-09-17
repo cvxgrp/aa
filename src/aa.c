@@ -199,7 +199,6 @@ static void init_gelsd(AaWork *a) {
   a->lwork = (blas_int)worksize;
   a->swork = (aa_float *)malloc(a->lwork * sizeof(aa_float));
   a->iwork = (blas_int *)malloc(a->lwork * sizeof(blas_int));
-}
 
 /* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
@@ -221,6 +220,7 @@ static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
            2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
+
   /* info < 0 input error, input > 0 matrix is singular */
   if (info != 0) {
     if (a->verbosity > 0) {
@@ -234,7 +234,7 @@ static aa_float solve_with_gelsd(aa_float *f, AaWork *a, aa_int len) {
     return -aa_norm;
   }
 
-  /* here work = gamma, ie, the shifted weights */
+  /* here work = gamma, ie, the correct AA shifted weights */
   /* if solve was successful compute new point */
   /* f -= D * work */
   BLAS(gemv)
