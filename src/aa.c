@@ -199,6 +199,7 @@ static void init_gelsd(AaWork *a) {
   a->lwork = (blas_int)worksize;
   a->swork = (aa_float *)malloc(a->lwork * sizeof(aa_float));
   a->iwork = (blas_int *)malloc(a->lwork * sizeof(blas_int));
+}
 
 /* solves the system of equations to perform the AA update
  * at the end f contains the next iterate to be returned
