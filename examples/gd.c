@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* default parameters */
 #define SEED (1234)
@@ -19,6 +20,35 @@ void BLAS(gemm)(const char *transa, const char *transb, blas_int *m, blas_int *n
                 blas_int *k, aa_float *alpha, aa_float *a, blas_int *lda,
                 aa_float *b, blas_int *ldb, aa_float *beta, aa_float *c,
                 blas_int *ldc);
+typedef struct timer {
+  struct timespec tic;
+  struct timespec toc;
+} timer;
+
+void tic(timer *t) {
+  clock_gettime(CLOCK_MONOTONIC, &t->tic);
+}
+
+aa_float tocq(timer *t) {
+  struct timespec temp;
+
+  clock_gettime(CLOCK_MONOTONIC, &t->toc);
+
+  if ((t->toc.tv_nsec - t->tic.tv_nsec) < 0) {
+    temp.tv_sec = t->toc.tv_sec - t->tic.tv_sec - 1;
+    temp.tv_nsec = 1e9 + t->toc.tv_nsec - t->tic.tv_nsec;
+  } else {
+    temp.tv_sec = t->toc.tv_sec - t->tic.tv_sec;
+    temp.tv_nsec = t->toc.tv_nsec - t->tic.tv_nsec;
+  }
+  return (aa_float)temp.tv_sec * 1e3 + (aa_float)temp.tv_nsec / 1e6;
+}
+
+aa_float toc(const char *str, timer *t) {
+  aa_float time = tocq(t);
+  printf("%s - time: %8.4f milli-seconds.\n", str, time);
+  return time;
+}
 
 /* uniform random number in [-1,1] */
 static aa_float rand_float(void) {
@@ -37,11 +67,13 @@ int main(int argc, char **argv) {
   aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
   aa_float err;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
+  timer aa_timer;
+  aa_float aa_time = 0;
 
   printf("Usage: 'out/gd memory type1 dimension step_size seed iters "
          "regularization relaxation safeguard_tolerance max_aa_norm'\n");
 
-  switch (argc-1) {
+  switch (argc - 1) {
   case 6:
     safeguard_tolerance = atof(argv[6]);
   case 5:
@@ -85,7 +117,9 @@ int main(int argc, char **argv) {
   AaWork *a = aa_init(n, memory, safeguard_tolerance, verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
+      tic(&aa_timer);
       aa_apply(x, xprev, a);
+      aa_time += tocq(&aa_timer);
     }
 
     memcpy(xprev, x, sizeof(aa_float) * n);
@@ -93,7 +127,9 @@ int main(int argc, char **argv) {
     BLAS(gemv)
     ("No", &n, &n, &neg_step_size, Q, &n, xprev, &one, &onef, x, &one);
 
+    tic(&aa_timer);
     aa_safeguard(x, xprev, a);
+    aa_time += tocq(&aa_timer);
 
     err = BLAS(nrm2)(&n, x, &one);
     if (i % PRINT_INTERVAL == 0) {
@@ -101,6 +137,7 @@ int main(int argc, char **argv) {
     }
   }
   printf("Iter: %i, Err %.4e\n", i, err);
+  printf("AA time: %.4f seconds\n", aa_time / 1e3);
   aa_finish(a);
   free(Q);
   free(Qhalf);
