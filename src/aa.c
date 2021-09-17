@@ -214,6 +214,7 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
            2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
+
   /* info < 0 input error, input > 0 matrix is singular */
   if (info != 0) {
     if (a->verbosity > 0) {
@@ -230,7 +231,7 @@ static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
     return -aa_norm;
   }
 
-  /* here work = gamma, ie, the shifted weights */
+  /* here work = gamma, ie, the correct AA shifted weights */
   /* if solve was successful compute new point */
 
   /* set f -= D * work */
