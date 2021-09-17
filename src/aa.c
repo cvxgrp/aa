@@ -371,7 +371,7 @@ static void update_qr_factorization(AaWork *a) {
   /* bottom right corner into r */
   r = 0; /* reset r to 0 */
   BLAS(rot)(&one, &(R[len * len - 1]), &one, &r, &one, &c, &s);
-  
+
   /* r contains bottom right corner here */
 
   /* Walk up the spike, R finishes upper Hessenberg */
@@ -474,11 +474,50 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     if (a->iter == a->mem) {
       /* initial QR factorization */
       qr_factorize(a, len);
+    }
+    else if (a->iter % (1000) == 0) {
+      /* refactorize periodically for stability */
+      qr_factorize(a, len);
     } else {
       /* update Q, R factors */
       update_qr_factorization(a);
     }
+
+/* delete this at some point */
+#define _TEST (0)
+#if _TEST > 0
+#define ABS(x) (((x) < 0) ? -(x) : (x))
+    aa_float *f_tmp = (aa_float *)malloc(a->dim * sizeof(aa_float));
+    memcpy(f_tmp, f, a->dim * sizeof(aa_float));
+
+    aa_float *R_tmp = (aa_float *)malloc(a->mem * a->mem * sizeof(aa_float));
+    memcpy(R_tmp, a->R, a->mem * a->mem * sizeof(aa_float));
+
     aa_norm = solve(f, a, len);
+
+    qr_factorize(a, len);
+    aa_float aa_norm_true = solve(f_tmp, a, len);
+
+    memcpy(a->R, R_tmp, a->mem * a->mem * sizeof(aa_float));
+
+    blas_int bdim = (blas_int)a->dim;
+    blas_int one = 1;
+    aa_float neg_onef = -1.0;
+
+    /* f_tmp -= f */
+    BLAS(axpy)(&bdim, &neg_onef, f, &one, f_tmp, &one);
+    aa_float nrm_err = BLAS(nrm2)(&bdim, f_tmp, &one);
+    if (nrm_err > 1e-6) {
+      printf("iter %i\n", a->iter);
+      printf("aa_norm %.4e, aa_norm_true %.4e\n", aa_norm, aa_norm_true);
+      printf("f error %.4e, f norm %.4e\n", nrm_err, BLAS(nrm2)(&bdim, f, &one));
+    }
+    free(f_tmp);
+    free(R_tmp);
+#else
+    aa_norm = solve(f, a, len);
+#endif
+
   }
   a->iter++;
   TIME_TOC
