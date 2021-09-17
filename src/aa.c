@@ -110,6 +110,12 @@ struct ACCEL_WORK {
   aa_float *Y_prev;
   aa_float *R;
 
+  /* QR decomp workspace */
+  aa_float *tau;
+  aa_float *Q;
+  blas_int lwork;
+  aa_float *qwork;
+
   /* workspace variables */
   aa_float *work; /* scratch space */
 };
@@ -240,31 +246,34 @@ static aa_float solve(aa_float * f, AaWork *a, aa_int len) {
   return aa_norm;
 }
 
+static void init_qr_workspace(AaWork *a) {
+  TIME_TIC
+  aa_float worksize;
+  blas_int bmem = (blas_int)a->mem;
+  blas_int bdim = (blas_int)a->dim;
+  blas_int neg_one = -1;
+  blas_int info;
+  a->tau = (aa_float *)calloc(a->mem, sizeof(aa_float));
+  a->Q = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
+  BLAS(geqrf)(&bdim, &bmem, a->Q, &bdim, a->tau, &worksize, &neg_one, &info);
+  a->lwork = (blas_int)worksize;
+  a->qwork = (aa_float *)calloc(a->lwork, sizeof(aa_float));
+  TIME_TOC
+}
+
 
 static void qr_factorize(AaWork *a, aa_int len) {
   TIME_TIC
   aa_int i;
   blas_int blen = (blas_int)len;
   blas_int bdim = (blas_int)a->dim;
-  blas_int neg_one = -1;
   blas_int info;
-  blas_int lwork;
-  aa_float worksize;
-  aa_float *work;
-  aa_float *tau = malloc(len * sizeof(aa_float));
-  aa_float *Q = malloc(a->dim * len * sizeof(aa_float));
-  memcpy(Q, a->Y, sizeof(aa_float) * a->dim * len);
-  BLAS(geqrf)(&bdim, &blen, Q, &bdim, tau, &worksize, &neg_one, &info);
-  lwork = (blas_int)worksize;
-  work = malloc(lwork * sizeof(aa_float));
-  BLAS(geqrf)(&bdim, &blen, Q, &bdim, tau, work, &lwork, &info);
+  memcpy(a->Q, a->Y, sizeof(aa_float) * a->dim * len);
+  BLAS(geqrf)(&bdim, &blen, a->Q, &bdim, a->tau, a->qwork, &a->lwork, &info);
   memset(a->R, 0, len * len * sizeof(aa_float));
   for (i = 0; i < len; ++i) {
-    memcpy(&(a->R[i * len]), &(Q[i * a->dim]), sizeof(aa_float) * (i + 1));
+    memcpy(&(a->R[i * len]), &(a->Q[i * a->dim]), sizeof(aa_float) * (i + 1));
   }
-  free(Q);
-  free(work);
-  free(tau);
   TIME_TOC
   return;
 }
@@ -333,9 +342,9 @@ static void update_qr_factorization(AaWork *a) {
   blas_int bmem = (blas_int)a->mem;
   blas_int bdim = (blas_int)a->dim;
   aa_float onef = 1.0;
-  aa_int i;
   aa_int len = a->mem;
   blas_int blen = (blas_int) a->mem;
+  aa_int i;
 
   /* Givens rotation workspace */
   aa_float nrm_dy, nrm_b;
@@ -447,6 +456,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
 
   a->R = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
 
+  init_qr_workspace(a);
+
   TIME_TOC
   return a;
 }
@@ -479,7 +490,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
       /* refactorize periodically for stability */
       qr_factorize(a, len);
     } else {
-      /* update Q, R factors */
+      /* update R factor */
       update_qr_factorization(a);
     }
 
@@ -573,6 +584,9 @@ void aa_finish(AaWork *a) {
     free(a->work);
     free(a->Y_prev);
     free(a->R);
+    free(a->tau);
+    free(a->Q);
+    free(a->qwork);
     free(a);
   }
   return;
