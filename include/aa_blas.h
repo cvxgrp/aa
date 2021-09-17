@@ -50,17 +50,18 @@ void BLAS(gemv)(const char *trans, const blas_int *m, const blas_int *n,
                 const aa_float *alpha, const aa_float *a, const blas_int *lda,
                 const aa_float *x, const blas_int *incx, const aa_float *beta,
                 aa_float *y, const blas_int *incy);
-void BLAS(gesv)(blas_int *n, blas_int *nrhs, aa_float *a, blas_int *lda,
-                blas_int *ipiv, aa_float *b, blas_int *ldb, blas_int *info);
-void BLAS(gemm)(const char *transa, const char *transb, blas_int *m,
-                blas_int *n, blas_int *k, aa_float *alpha, aa_float *a,
-                blas_int *lda, aa_float *b, blas_int *ldb, aa_float *beta,
-                aa_float *c, blas_int *ldc);
 void BLAS(scal)(const blas_int *n, const aa_float *a, aa_float *x,
                 const blas_int *incx);
-void BLAS(gelsy)(blas_int *m, blas_int *n, blas_int *nrhs, aa_float *a,
-                 blas_int *lda, aa_float *b, blas_int *ldb, blas_int *jpvt,
-                 aa_float *rcond, blas_int *rank, aa_float *work, blas_int *lwork, blas_int *info);
+void BLAS(geqrf)(blas_int *m, blas_int *n, aa_float *a, blas_int *lda,
+                 aa_float *tau, aa_float *work, blas_int *lwork,
+                 blas_int *info);
+void BLAS(trsv)(const char *uplo, const char *trans, const char *diag,
+                blas_int *n, aa_float *a, blas_int *lda, aa_float *x,
+                blas_int *incx);
+void BLAS(rotg)(aa_float *a, aa_float *b, aa_float *c, aa_float *s);
+void BLAS(rot)(const blas_int *n, aa_float *x, const blas_int *incx,
+               aa_float *y, const blas_int *incy, const aa_float *c,
+               const aa_float *s);
 
 #ifdef __cplusplus
 }

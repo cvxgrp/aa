@@ -99,17 +99,19 @@ struct ACCEL_WORK {
   aa_float *g_prev; /* x_prev - f(x_prev) */
 
   aa_float *y; /* g - g_prev */
-  aa_float *s; /* x - x_prev */
   aa_float *d; /* f - f_prev */
 
+  aa_float *dy; /* y - y_prev */
+
   aa_float *Y; /* matrix of stacked y values */
-  aa_float *S; /* matrix of stacked s values */
   aa_float *D; /* matrix of stacked d values = (S-Y) */
   aa_float *M; /* S'Y or Y'Y depending on type of aa */
 
+  aa_float *Y_prev;
+  aa_float *R;
+
   /* workspace variables */
   aa_float *work; /* scratch space */
-  blas_int *ipiv; /* permutation variable, not used after solve */
 };
 
 /* initialize accel params, in particular x_prev, f_prev, g_prev */
@@ -129,12 +131,16 @@ static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
   TIME_TOC
 }
 
+static inline aa_int get_idx(AaWork * a) {
+  return (a->iter - 1) % a->mem;
+}
+
 /* updates the workspace parameters for aa for this iteration */
 static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
                                 aa_int len) {
   /* at the start a->x = x_prev and a->f = f_prev */
   TIME_TIC
-  aa_int idx = (a->iter - 1) % a->mem;
+  aa_int idx = get_idx(a);
   blas_int one = 1;
   blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
@@ -156,6 +162,14 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, a->y, &one);
 
   /* y correct here */
+
+  /* Y_prev <- Y */
+  memcpy(a->Y_prev, a->Y, a->mem * a->dim * sizeof(aa_float));
+
+  /* dy = y */
+  memcpy(a->dy, a->y, sizeof(aa_float) * a->dim);
+  /* dy = y - y_prev */
+  BLAS(axpy)(&bdim, &neg_onef, &(a->Y[idx * a->dim]), &one, a->dy, &one);
 
   /* copy y into idx col of Y */
   memcpy(&(a->Y[idx * a->dim]), a->y, sizeof(aa_float) * a->dim);
@@ -180,6 +194,53 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   return;
 }
 
+/* y = Q^T x = R^{-T} Y^T x , Where Y = QR */
+static void mult_by_q_trans(AaWork * a, aa_float *Y, aa_float * R, aa_float * x, aa_float *y) {
+  TIME_TIC
+  blas_int one = 1;
+  blas_int blen = (blas_int)a->mem;
+  blas_int bdim = (blas_int)a->dim;
+  aa_float zerof = 0.0;
+  aa_float onef = 1.0;
+  /* y = Y^T x */
+  BLAS(gemv)
+  ("Trans", &bdim, &blen, &onef, Y, &bdim, x, &one, &zerof, y, &one);
+  /* y = R^{-T} y */
+  BLAS(trsv)("Upper", "Trans", "NotUnitDiag", &blen, R, &blen, y, &one);
+  TIME_TOC
+}
+
+
+/* solve A w = g  =>  QR w = g  =>  w = R^{-1} Q' g  ( = R^-1 R^{-T} A^T g) */
+static aa_float solve(aa_float * f, AaWork *a, aa_int len) {
+  TIME_TIC
+  blas_int bdim = (blas_int)a->dim;
+  blas_int one = 1;
+  blas_int blen = (blas_int)len;
+  aa_float onef = 1.0;
+  aa_float neg_onef = -1.0;
+  aa_float *w = a->work;
+  aa_float aa_norm;
+
+  /* w = Q' * g */
+  mult_by_q_trans(a, a->Y, a->R, a->g, w);
+  /* w = R^-1 * work */
+  BLAS(trsv)
+  ("Upper", "NoTrans", "NotUnitDiag", &blen, a->R, &blen, w, &one);
+
+  aa_norm = BLAS(nrm2)(&blen, a->work, &one);
+
+  /* set f -= D * work */
+  BLAS(gemv)
+  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, w, &one, &onef, f,
+   &one);
+
+  a->success = 1; /* this should be the only place we set success = 1 */
+  TIME_TOC
+  return aa_norm;
+}
+
+
 static void qr_factorize(AaWork *a, aa_int len) {
   TIME_TIC
   aa_int i;
@@ -190,153 +251,160 @@ static void qr_factorize(AaWork *a, aa_int len) {
   blas_int lwork;
   aa_float worksize;
   aa_float *work;
-  aa_float *tau = aa_malloc(len * sizeof(aa_float));
-  aa_float *Q = aa_malloc(a->dim * len * sizeof(aa_float));
+  aa_float *tau = malloc(len * sizeof(aa_float));
+  aa_float *Q = malloc(a->dim * len * sizeof(aa_float));
   memcpy(Q, a->Y, sizeof(aa_float) * a->dim * len);
-  BLAS(geqrf)(&bdim, &bmem, Q, &bdim, tau, &worksize, &negOne, &info);
+  BLAS(geqrf)(&bdim, &blen, Q, &bdim, tau, &worksize, &neg_one, &info);
   lwork = (blas_int)worksize;
-  work = aa_malloc(lwork * sizeof(aa_float));
-  BLAS(geqrf)(&bdim, &bmem, Q, &bdim, tau, work, &lwork, &info);
-  aa_free(work);
-  aa_free(tau);
+  work = malloc(lwork * sizeof(aa_float));
+  BLAS(geqrf)(&bdim, &blen, Q, &bdim, tau, work, &lwork, &info);
+  memset(a->R, 0, len * len * sizeof(aa_float));
+  for (i = 0; i < len; ++i) {
+    memcpy(&(a->R[i * len]), &(Q[i * a->dim]), sizeof(aa_float) * (i + 1));
+  }
+  free(Q);
+  free(work);
+  free(tau);
   TIME_TOC
   return;
 }
 
-static void update_qr_factorization(AaWork *a, aa_int idx, aa_int len) {
+
+/*
+ * Have A = QR (partial, Q'Q = I_n but QQ' != I_m)
+ *
+ * want \tilde Y = Y + [0 ... dy ... 0] (single column update)
+ *
+ * First find u, b, r, such that
+ *
+ * \tilde Y = [Q u] ( [ R ]   + [ 0 ... b ... 0 ] ) = \tilde Q \tilde R
+ *                    [ 0 ]     [ 0 ... r ... 0 ]
+ *
+ *  Under the constraint that ||u|| = 1 and Q'u = 0 (orthogonality) yields
+ *
+ *    Q b + a u = dy
+ *    => Q'(Q b + r u) = Q' dy
+ *    => b = Q' dy                    (costs one multiply by Q')
+ *
+ *    and
+ *
+ *    r = || dy - Q b|| we can do this without another multiply using:
+ *
+ *    r^2 = (dy - Qb)' (dy - Qb)
+ *        = ||dy||^2 - 2 b'Q'dy + b' Q' Q b
+ *        = ||dy||^2 - 2 ||b||^2 + ||b||^2
+ *        = ||dy||^2 - ||b||^2
+ *
+ *  Then we use Givens rotations to make \tilde R upper triangular.
+ *
+ *  \tilde R starts like:
+ *
+ *  [ * * * * * * ]
+ *  [   * * * * * ]
+ *  [     * * * * ]
+ *  [     x * * * ]
+ *  [     x   * * ]
+ *  [     x     * ]
+ *  [     r       ]  <- 'fake' bottom row
+ *
+ *  Using Givens rotations on the rows starting at the bottom row and working up
+ *  to get rid of the spike we have upper Hessenberg:
+ *
+ *  [ * * * * * * ]
+ *  [   * * * * * ]
+ *  [     * * * * ]
+ *  [       * * * ]
+ *  [       x * * ]
+ *  [         x * ]
+ *  [           x ]  <- 'fake' bottom row will end up all zeros
+ *
+ *  More Givens rotations on the rows starting at the first extra subdiagonal
+ *  and working down are used to reduce this to upper triangular.
+ *
+ *  We don't need or use Q directly, we use A, R^{-1} (fast) instead.
+ *
+ */
+static void update_qr_factorization(AaWork *a) {
   TIME_TIC
   aa_float *R = a->R;
   aa_float *dy = a->dy;
+  aa_float *b = a->work;
   blas_int one = 1;
   blas_int bmem = (blas_int)a->mem;
   blas_int bdim = (blas_int)a->dim;
-  aa_float zerof = 0.0;
   aa_float onef = 1.0;
-  aa_float negOnef = -1.0;
   aa_int i;
+  aa_int len = a->mem;
+  blas_int blen = (blas_int) a->mem;
 
   /* Givens rotation workspace */
-  aa_float nrm_dy;
+  aa_float nrm_dy, nrm_b;
   aa_float c;
   aa_float s;
+  aa_float r1;
+  aa_float r2;
+  aa_int ridx;
+  aa_float r;
+
+  /* get column index into R */
+  aa_int idx = get_idx(a);
 
   /* Y_prev = Q R */
 
-  /* work = Q' * dy = R^-T * Y_prev' * dy, size dim: col of R */
-  BLAS(gemv)
-  ("Trans", &bdim, &bk, &onef, a->Y_prev, &bdim, dy, &one, &zerof, a->work, &one);
-  BLAS(trsv)("Upper", "Trans", "NotUnitDiag", &bk, a->R, &bk, a->work, &one);
-  
-  /* a->work contains new column of R */
+  /* b = Q' * dy - length len */
+  /* Use R and Y from previous iteration */
+  mult_by_q_trans(a, a->Y_prev, a->R, dy, b);
 
-  /* dy := dy - Q * w = dy - dF * R^-1 w, size m: col of Q */
-  //TODO preserve work since it gets overwritten here
-  BLAS(trsv)("Upper", "NoTrans", "NotUnitDiag", &bk, a->R, &bk, a->work, &one);
-  BLAS(gemv)
-  ("NoTrans", &bdim, &bk, &negOnef, a->dFold, &bdim, a->work, &one, &onef, u, &one);
-  
-  /* R col += work */
-  addScaledArray(&(R[idx * len]), a->work, len, 1.0);
+  /* R col += b */
+  BLAS(axpy)(&bmem, &onef, b, &one, &(R[idx * a->mem]), &one);
 
-  memset(a->bot_row, 0, a->dim * sizeof(aa_float));
-  a->bot_row[idx] = BLAS(nrm2)(&bdim, dy, &one); /* norm dy */
-  /* Givens rotations, start with fake bottom row of R, extra col of Q */
-  aa_int ridx = len * idx + len - 1;
-  aa_float r1 = R[ridx];
-  BLAS(rotg)(&r1, &(a->bot_row[idx]), &c, &s);
-  /* note the non-unit stride (inc) here indicates rows */
-  BLAS(rot)(&bk, &(R[len - 1]), &bk, bot_row, &one, &c, &s);
+  nrm_dy = BLAS(nrm2)(&bdim, dy, &one);
+  nrm_b = BLAS(nrm2)(&blen, b, &one);
+
+  r = sqrt(MAX(nrm_dy * nrm_dy - nrm_b * nrm_b, 0.));
+
+  /* Now we start the Givens rotations */
+
+  /* Start with fake bottom row of R, extra col of Q */
+  ridx = len * (idx + 1) - 1;
+  BLAS(rotg)(&(R[ridx]), &r, &c, &s); /* r = garbage after this */
+  /* bottom right corner into r */
+  r = 0; /* reset r to 0 */
+  BLAS(rot)(&one, &(R[len * len - 1]), &one, &r, &one, &c, &s);
+  
+  /* r contains bottom right corner here */
 
   /* Walk up the spike, R finishes upper Hessenberg */
   for (i = len; i > idx + 1; --i) {
-    aa_int ridx = len * idx + i - 1;
-    aa_float r1 = R[ridx - 1];
-    aa_float r2 = R[ridx];
-    BLAS(rotg)(&(r1), &(r2), &c, &s);
+    ridx = len * idx + i - 1;
+    /* copy values so that the vectors aren't overwritten */
+    r1 = R[ridx - 1];
+    r2 = R[ridx];
+    BLAS(rotg)(&r1, &r2, &c, &s);
     /* note the non-unit stride (inc) here indicates rows */
-    BLAS(rot)(&bk, &(R[i - 2]), &bk, &(R[i - 1]), &bk, &c, &s);
+    BLAS(rot)(&blen, &(R[i - 2]), &blen, &(R[i - 1]), &blen, &c, &s);
   }
 
   /* Walk down the sub-diagonal, R finishes upper triangular */
   for (i = idx + 1; i < len - 1; ++i) {
-    aa_int ridx = len * i + i;
-    aa_float r1 = R[ridx];
-    aa_float r2 = R[ridx + 1];
+    ridx = len * i + i;
+    /* copy values so that the vectors aren't overwritten */
+    r1 = R[ridx];
+    r2 = R[ridx + 1];
     BLAS(rotg)(&r1, &r2, &c, &s);
     /* note the non-unit stride (inc) here indicates rows */
-    BLAS(rot)(&bk, &(R[i]), &bk, &(R[i + 1]), &bk, &c, &s);
+    BLAS(rot)(&blen, &(R[i]), &blen, &(R[i + 1]), &blen, &c, &s);
   }
 
-  /* Finish fake bottom row of R, extra col of Q */
-  BLAS(rotg)(&(R[len * len - 1]), &(a->bot_row[len - 1]), &c, &s);
-  aa_free(a->bot_row);
+  /* Finish fake bottom row of R, extra col of Q
+   * Note: here we pass the addresses to rotg directly which performs the
+   * rotation instead of later calling rot
+   */
+  BLAS(rotg)(&(R[len * len - 1]), &r, &c, &s); /* r = garbage after this */
   TIME_TOC
   return;
 }
 
-
-/* solves the system of equations to perform the AA update
- * at the end f contains the next iterate to be returned
- */
-static aa_float solve_with_gelsy(aa_float *f, AaWork *a, aa_int len) {
-  TIME_TIC
-  blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
-  blas_int neg_one = -1;
-  aa_float onef = 1.0, neg_onef = -1.0, aa_norm;
-
-  blas_int rank;
-  blas_int lwork;
-
-  memcpy(a->work, a->g, a->dim * sizeof(aa_float));
-
-  blas_int *jpvt = (blas_int *)calloc(len, sizeof(blas_int));
-  aa_float rcond = -1;
-
-  aa_float *mat = (aa_float *)malloc(a->dim * len * sizeof(aa_float));
-  memcpy(mat, a->Y, a->dim * len * sizeof(aa_float));
-
-  aa_float worksize;
-  BLAS(gelsy)
-  (&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond, &rank,
-   &worksize, &neg_one, &info);
-  lwork = (blas_int)worksize;
-  aa_float *work = (aa_float *)malloc(lwork * sizeof(aa_float));
-  BLAS(gelsy)
-  (&bdim, &blen, &one, mat, &bdim, a->work, &bdim, jpvt, &rcond, &rank, work,
-   &lwork, &info);
-
-  aa_norm = BLAS(nrm2)(&blen, a->work, &one);
-  if (a->verbosity > 1) {
-    printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n", 2,
-           (int)a->iter, (int)len, (int)info, aa_norm);
-  }
-  /* info < 0 input error, input > 0 matrix is singular */
-  if (info != 0) {
-    if (a->verbosity > 0) {
-      printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-             2, (int)a->iter, (int)len, (int)info, aa_norm);
-    }
-    a->success = 0;
-    /* reset aa for stability */
-    aa_reset(a);
-    free(jpvt);
-    free(mat);
-    free(work);
-    TIME_TOC
-    return -aa_norm;
-  }
-
-  /* here work = gamma, ie, the shifted weights */
-  /* if solve was successful compute new point */
-
-  /* set f -= D * work */
-  BLAS(gemv)
-  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, a->work, &one, &onef, f,
-   &one);
-  a->success = 1; /* this should be the only place we set success = 1 */
-  TIME_TOC
-  return aa_norm;
-}
 
 /*
  * API functions below this line, see aa.h for descriptions.
@@ -368,12 +436,16 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
   a->y = (aa_float *)calloc(a->dim, sizeof(aa_float));
   a->d = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
+  a->dy = (aa_float *)calloc(a->dim, sizeof(aa_float));
+
   a->Y = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
-  a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
+  a->Y_prev = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
+
   a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
-  a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
+
+  a->R = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
 
   TIME_TOC
   return a;
@@ -395,13 +467,18 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     TIME_TOC
     return aa_norm; /* 0 */
   }
-  /* set various accel quantities */
+  /* set various acceleration quantities */
   update_accel_params(x, f, a, len);
 
-  /* only perform solve steps when the memory is full */
-  if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
-    /* solve linear system, new point overwrites f if successful */
-    aa_norm = solve_with_gelsy(f, a, len);
+  if (a->iter >= a->mem) {
+    if (a->iter == a->mem) {
+      /* initial QR factorization */
+      qr_factorize(a, len);
+    } else {
+      /* update Q, R factors */
+      update_qr_factorization(a);
+    }
+    aa_norm = solve(f, a, len);
   }
   a->iter++;
   TIME_TOC
@@ -450,11 +527,13 @@ void aa_finish(AaWork *a) {
     free(a->g_prev);
     free(a->y);
     free(a->d);
+    free(a->dy);
     free(a->Y);
     free(a->D);
     free(a->M);
     free(a->work);
-    free(a->ipiv);
+    free(a->Y_prev);
+    free(a->R);
     free(a);
   }
   return;

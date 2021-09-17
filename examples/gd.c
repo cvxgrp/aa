@@ -15,6 +15,11 @@
 #define PRINT_INTERVAL (500)
 #define VERBOSITY (1)
 
+void BLAS(gemm)(const char *transa, const char *transb, blas_int *m, blas_int *n,
+                blas_int *k, aa_float *alpha, aa_float *a, blas_int *lda,
+                aa_float *b, blas_int *ldb, aa_float *beta, aa_float *c,
+                blas_int *ldc);
+
 /* uniform random number in [-1,1] */
 static aa_float rand_float(void) {
   return 2 * (((aa_float)rand()) / RAND_MAX) - 1;
