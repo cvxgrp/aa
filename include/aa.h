@@ -33,7 +33,7 @@ typedef struct ACCEL_WORK AaWork;
  *
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
-                aa_int verbosity);
+                aa_int refactorization_period, aa_int verbosity);
 
 /**
  * Apply Anderson Acceleration. The usage pattern should be as follows:

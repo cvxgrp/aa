@@ -10,6 +10,7 @@
 #define SEED (1234)
 #define DIM (1000)
 #define MEM (5)
+#define REFATORIZATION_PERIOD (1000)
 #define SAFEGUARD_TOLERANCE (2.0)
 #define ITERS (30000)
 #define STEPSIZE (0.001)
@@ -61,15 +62,18 @@ int main(int argc, char **argv) {
   aa_int verbosity = VERBOSITY;
   aa_float neg_step_size = -STEPSIZE;
   aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
+  aa_int refactorization_period = REFATORIZATION_PERIOD;
   aa_float err = 0;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
   _timer aa_timer;
   aa_float aa_time = 0;
 
-  printf("Usage: 'out/gd memory type1 dimension step_size seed iters "
-         "regularization relaxation safeguard_tolerance max_aa_norm'\n");
+  printf("Usage: 'out/gd memory dimension step_size seed "
+         "safeguard_tolerance refactorization_period'\n");
 
   switch (argc - 1) {
+  case 7:
+    refactorization_period = atoi(argv[7]);
   case 6:
     safeguard_tolerance = atof(argv[6]);
   case 5:
@@ -110,7 +114,8 @@ int main(int argc, char **argv) {
     Q[i + i * n] += 1e-6;
   }
 
-  AaWork *a = aa_init(n, memory, safeguard_tolerance, verbosity);
+  AaWork *a = aa_init(n, memory, safeguard_tolerance, refactorization_period,
+                      verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       _tic(&aa_timer);

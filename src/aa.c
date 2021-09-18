@@ -89,6 +89,7 @@ struct ACCEL_WORK {
   aa_int success;   /* was the last AA step successful or not */
 
   aa_float safeguard_factor; /* safeguard tolerance factor */
+  aa_int refactorization_period; /* how often to do a full QR re-factor */
 
   aa_float *x;     /* x input to map*/
   aa_float *f;     /* f(x) output of map */
@@ -423,7 +424,7 @@ static void update_qr_factorization(AaWork *a) {
  * API functions below this line, see aa.h for descriptions.
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
-                aa_int verbosity) {
+                aa_int refactorization_period, aa_int verbosity) {
   TIME_TIC
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
@@ -434,6 +435,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
   a->dim = dim;
   a->mem = mem;
   a->safeguard_factor = safeguard_factor;
+  a->refactorization_period = refactorization_period;
   a->success = 0;
   a->verbosity = verbosity;
   if (a->mem <= 0) {
@@ -490,7 +492,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
       /* initial QR factorization */
       qr_factorize(a, len);
     }
-    else if (a->iter % (1000) == 0) {
+    else if (a->iter % a->refactorization_period == 0) {
       /* refactorize periodically for stability */
       qr_factorize(a, len);
     } else {
