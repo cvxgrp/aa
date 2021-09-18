@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
   aa_int verbosity = VERBOSITY;
   aa_float neg_step_size = -STEPSIZE;
   aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
-  aa_float err;
+  aa_float err = 0;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
   _timer aa_timer;
   aa_float aa_time = 0;
