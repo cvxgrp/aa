@@ -386,7 +386,7 @@ static void update_qr_factorization(AaWork *a) {
 
   /* Walk up the spike, R finishes upper Hessenberg */
 
-  bn = (blas_int)(len - idx);
+  bn = (blas_int)(len - idx); /* number of entries in row from spike */
   for (i = len; i > idx + 1; --i) { /* i is row */
     ridx = len * idx + i - 1;
     /* copy values so that the vectors aren't overwritten */
@@ -399,7 +399,7 @@ static void update_qr_factorization(AaWork *a) {
 
   /* Walk down the sub-diagonal, R finishes upper triangular */
   for (i = idx + 1; i < len - 1; ++i) { /* i is col */
-    bn = (blas_int)(len - i);
+    bn = (blas_int)(len - i); /* number of entries in row from entry */
     ridx = len * i + i;
     /* copy values so that the vectors aren't overwritten */
     r1 = R[ridx];
