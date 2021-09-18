@@ -344,6 +344,7 @@ static void update_qr_factorization(AaWork *a) {
   aa_float onef = 1.0;
   aa_int len = a->mem;
   blas_int blen = (blas_int) a->mem;
+  blas_int bn;
   aa_int i;
 
   /* Givens rotation workspace */
@@ -384,25 +385,28 @@ static void update_qr_factorization(AaWork *a) {
   /* r contains bottom right corner here */
 
   /* Walk up the spike, R finishes upper Hessenberg */
-  for (i = len; i > idx + 1; --i) {
+
+  bn = (blas_int)(len - idx);
+  for (i = len; i > idx + 1; --i) { /* i is row */
     ridx = len * idx + i - 1;
     /* copy values so that the vectors aren't overwritten */
     r1 = R[ridx - 1];
     r2 = R[ridx];
     BLAS(rotg)(&r1, &r2, &c, &s);
     /* note the non-unit stride (inc) here indicates rows */
-    BLAS(rot)(&blen, &(R[i - 2]), &blen, &(R[i - 1]), &blen, &c, &s);
+    BLAS(rot)(&bn, &(R[ridx - 1]), &blen, &(R[ridx]), &blen, &c, &s);
   }
 
   /* Walk down the sub-diagonal, R finishes upper triangular */
-  for (i = idx + 1; i < len - 1; ++i) {
+  for (i = idx + 1; i < len - 1; ++i) { /* i is col */
+    bn = (blas_int)(len - i);
     ridx = len * i + i;
     /* copy values so that the vectors aren't overwritten */
     r1 = R[ridx];
     r2 = R[ridx + 1];
     BLAS(rotg)(&r1, &r2, &c, &s);
     /* note the non-unit stride (inc) here indicates rows */
-    BLAS(rot)(&blen, &(R[i]), &blen, &(R[i + 1]), &blen, &c, &s);
+    BLAS(rot)(&bn, &(R[ridx]), &blen, &(R[ridx + 1]), &blen, &c, &s);
   }
 
   /* Finish fake bottom row of R, extra col of Q
