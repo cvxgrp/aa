@@ -88,7 +88,7 @@ struct ACCEL_WORK {
   aa_int verbosity; /* verbosity level, 0 is no printing */
   aa_int success;   /* was the last AA step successful or not */
 
-  aa_float safeguard_factor; /* safeguard tolerance factor */
+  aa_float safeguard_factor;     /* safeguard tolerance factor */
   aa_int refactorization_period; /* how often to do a full QR re-factor */
 
   aa_float *x;     /* x input to map*/
@@ -138,7 +138,7 @@ static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
   TIME_TOC
 }
 
-static inline aa_int get_idx(AaWork * a) {
+static inline aa_int get_idx(AaWork *a) {
   return (a->iter - 1) % a->mem;
 }
 
@@ -202,7 +202,8 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
 }
 
 /* y = Q^T x = R^{-T} Y^T x , Where Y = QR */
-static void mult_by_q_trans(AaWork * a, aa_float *Y, aa_float * R, aa_float * x, aa_float *y) {
+static void mult_by_q_trans(AaWork *a, aa_float *Y, aa_float *R, aa_float *x,
+                            aa_float *y) {
   TIME_TIC
   blas_int one = 1;
   blas_int blen = (blas_int)a->mem;
@@ -217,9 +218,8 @@ static void mult_by_q_trans(AaWork * a, aa_float *Y, aa_float * R, aa_float * x,
   TIME_TOC
 }
 
-
 /* solve A w = g  =>  QR w = g  =>  w = R^{-1} Q' g  ( = R^-1 R^{-T} A^T g) */
-static aa_float solve(aa_float * f, AaWork *a, aa_int len) {
+static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int bdim = (blas_int)a->dim;
   blas_int one = 1;
@@ -239,8 +239,7 @@ static aa_float solve(aa_float * f, AaWork *a, aa_int len) {
 
   /* set f -= D * work */
   BLAS(gemv)
-  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, w, &one, &onef, f,
-   &one);
+  ("NoTrans", &bdim, &blen, &neg_onef, a->D, &bdim, w, &one, &onef, f, &one);
 
   a->success = 1; /* this should be the only place we set success = 1 */
   TIME_TOC
@@ -262,7 +261,6 @@ static void init_qr_workspace(AaWork *a) {
   TIME_TOC
 }
 
-
 static void qr_factorize(AaWork *a, aa_int len) {
   TIME_TIC
   aa_int i;
@@ -278,7 +276,6 @@ static void qr_factorize(AaWork *a, aa_int len) {
   TIME_TOC
   return;
 }
-
 
 /*
  * Have A = QR (partial, Q'Q = I_n but QQ' != I_m)
@@ -344,7 +341,7 @@ static void update_qr_factorization(AaWork *a) {
   blas_int bdim = (blas_int)a->dim;
   aa_float onef = 1.0;
   aa_int len = a->mem;
-  blas_int blen = (blas_int) a->mem;
+  blas_int blen = (blas_int)a->mem;
   blas_int bn;
   aa_int i;
 
@@ -387,7 +384,7 @@ static void update_qr_factorization(AaWork *a) {
 
   /* Walk up the spike, R finishes upper Hessenberg */
 
-  bn = (blas_int)(len - idx); /* number of entries in row from spike */
+  bn = (blas_int)(len - idx);       /* number of entries in row from spike */
   for (i = len; i > idx + 1; --i) { /* i is row */
     ridx = len * idx + i - 1;
     /* copy values so that the vectors aren't overwritten */
@@ -418,7 +415,6 @@ static void update_qr_factorization(AaWork *a) {
   TIME_TOC
   return;
 }
-
 
 /*
  * API functions below this line, see aa.h for descriptions.
@@ -491,8 +487,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     if (a->iter == a->mem) {
       /* initial QR factorization */
       qr_factorize(a, len);
-    }
-    else if (a->iter % a->refactorization_period == 0) {
+    } else if (a->iter % a->refactorization_period == 0) {
       /* refactorize periodically for stability */
       qr_factorize(a, len);
     } else {
@@ -527,14 +522,14 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
     if (nrm_err > 1e-6) {
       printf("iter %i\n", a->iter);
       printf("aa_norm %.4e, aa_norm_true %.4e\n", aa_norm, aa_norm_true);
-      printf("f error %.4e, f norm %.4e\n", nrm_err, BLAS(nrm2)(&bdim, f, &one));
+      printf("f error %.4e, f norm %.4e\n", nrm_err,
+             BLAS(nrm2)(&bdim, f, &one));
     }
     free(f_tmp);
     free(R_tmp);
 #else
     aa_norm = solve(f, a, len);
 #endif
-
   }
   a->iter++;
   TIME_TOC
