@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
   aa_float relaxation = RELAXATION;
   aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
   aa_float max_aa_norm = MAX_AA_NORM;
-  aa_float err;
+  aa_float err = 0;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
   _timer aa_timer;
   aa_float aa_time = 0;
