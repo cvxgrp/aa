@@ -26,7 +26,7 @@ $(OUT)/libaa.a: $(OBJECTS)
 	- ranlib $@
 
 $(OUT)/gd: examples/gd.c $(OUT)/libaa.a
-	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack
+	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack -lm
 
 clean:
 	@rm -rf $(OBJECTS)
