@@ -259,7 +259,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
   }
   a->iter = 0;
   a->dim = dim;
-  a->mem = mem;
+  a->mem = MIN(mem, dim); /* for rank stability */
   a->safeguard_factor = safeguard_factor;
   a->success = 0;
   a->verbosity = verbosity;
@@ -327,6 +327,10 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
     TIME_TOC
     return 0;
   }
+
+  /* reset success indicator in case safeguarding called multiple times */
+  a->success = 0;
+
   /* work = x_new */
   memcpy(a->work, x_new, a->dim * sizeof(aa_float));
   /* work = x_new - f_new */
