@@ -429,7 +429,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_float safeguard_factor,
   }
   a->iter = 0;
   a->dim = dim;
-  a->mem = mem;
+  a->mem = MIN(mem, dim); /* otherwise QR low rank and get nans */
   a->safeguard_factor = safeguard_factor;
   a->refactorization_period = refactorization_period;
   a->success = 0;
