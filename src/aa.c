@@ -318,7 +318,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->type1 = type1;
   a->iter = 0;
   a->dim = dim;
-  a->mem = mem;
+  a->mem = MIN(mem, dim); /* for rank stability */
   a->regularization = regularization;
   a->relaxation = relaxation;
   a->safeguard_factor = safeguard_factor;
