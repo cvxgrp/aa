@@ -127,7 +127,7 @@ static aa_float compute_regularization(AaWork *a, aa_int len) {
   nrm_m = BLAS(nrm2)(&btotal, a->M, &one);
   r = a->regularization * nrm_m;
   if (a->verbosity > 2) {
-    printf("iter: %i, norm: M %.2e, r: %.2e\n", a->iter, nrm_m, r);
+    printf("iter: %i, norm: M %.2e, r: %.2e\n", (int)a->iter, nrm_m, r);
   }
   TIME_TOC
   return r;
