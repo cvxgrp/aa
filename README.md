@@ -1,5 +1,8 @@
 AA
-====
+===
+
+[![Build Status](https://github.com/cvxgrp/aa/actions/workflows/build.yml/badge.svg)](https:/
+/github.com/cvxgrp/aa/actions/workflows/build.yml)
 
 AA (`Anderson Acceleration`)
 
