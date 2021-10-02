@@ -16,7 +16,7 @@
 #define TYPE2_REGULARIZATION (0)
 #define SAFEGUARD_TOLERANCE (2.0)
 #define MAX_AA_NORM (1e10)
-#define ITERS (50000)
+#define ITERS (10000)
 #define STEPSIZE (0.01)
 #define PRINT_INTERVAL (500)
 #define VERBOSITY (1)
@@ -91,7 +91,7 @@ static const char *gd(aa_int type1, aa_float relaxation) {
 
   /* add small amount regularization */
   for (i = 0; i < n; i++) {
-    Q[i + i * n] += 1e-6;
+    Q[i + i * n] += 1e-2;
   }
 
   AaWork *a = aa_init(n, memory, type1, regularization, relaxation,
