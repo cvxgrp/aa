@@ -98,10 +98,10 @@ int main(int argc, char **argv) {
     printf("Running default parameters.\n");
   }
 
-  x = malloc(sizeof(aa_float) * n);
-  xprev = malloc(sizeof(aa_float) * n);
-  Qhalf = malloc(sizeof(aa_float) * n * n);
-  Q = malloc(sizeof(aa_float) * n * n);
+  x = (aa_float *)malloc(sizeof(aa_float) * n);
+  xprev = (aa_float *)malloc(sizeof(aa_float) * n);
+  Qhalf = (aa_float *)malloc(sizeof(aa_float) * n * n);
+  Q = (aa_float *)malloc(sizeof(aa_float) * n * n);
 
   srand(seed);
 

@@ -65,10 +65,10 @@ static const char *gd(aa_int type1, aa_float relaxation) {
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
   _timer aa_timer;
   aa_float aa_time = 0;
-  x = malloc(sizeof(aa_float) * n);
-  xprev = malloc(sizeof(aa_float) * n);
-  Qhalf = malloc(sizeof(aa_float) * n * n);
-  Q = malloc(sizeof(aa_float) * n * n);
+  x = (aa_float *)malloc(sizeof(aa_float) * n);
+  xprev = (aa_float *)malloc(sizeof(aa_float) * n);
+  Qhalf = (aa_float *)malloc(sizeof(aa_float) * n * n);
+  Q = (aa_float *)malloc(sizeof(aa_float) * n * n);
 
   srand(seed);
 
