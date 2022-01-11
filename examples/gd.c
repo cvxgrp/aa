@@ -8,7 +8,7 @@
 
 /* default parameters */
 #define SEED (1234)
-#define TYPE1 (0)
+#define TYPE1 (1)
 #define DIM (1000)
 #define MEM (5)
 #define REGULARIZATION (0)
