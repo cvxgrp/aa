@@ -134,27 +134,27 @@ static const char *gd_type1_relax1(void) {
   return gd(1, 1.0);
 }
 
-static const char *gd_type1_relax15(void) {
-  return gd(1, 1.5);
+static const char *gd_type1_relaxl1(void) {
+  return gd(1, 0.98);
 }
 
 static const char *gd_type2_relax1(void) {
   return gd(0, 1.0);
 }
 
-static const char *gd_type2_relax15(void) {
-  return gd(0, 1.5);
+static const char *gd_type2_relaxl1(void) {
+  return gd(0, 0.98);
 }
 
 static const char *all_tests(void) {
   printf("type 1, relaxation 1.0\n");
   mu_run_test(gd_type1_relax1);
-  printf("type 1, relaxation 1.5\n");
-  mu_run_test(gd_type1_relax15);
+  printf("type 1, relaxation < 1.0\n");
+  mu_run_test(gd_type1_relaxl1);
   printf("type 2, relaxation 1.0\n");
   mu_run_test(gd_type2_relax1);
-  printf("type 2, relaxation 1.5\n");
-  mu_run_test(gd_type2_relax15);
+  printf("type 2, relaxation < 1.0\n");
+  mu_run_test(gd_type2_relaxl1);
   return 0;
 }
 
