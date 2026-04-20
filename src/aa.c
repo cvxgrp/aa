@@ -494,7 +494,7 @@ void aa_finish(AaWork *a) {
 }
 
 void aa_reset(AaWork *a) {
-  /* to reset we simply set a->iter = 0 */
+  /* reset to the same logical state as a freshly calloc'd workspace */
   if (!a) {
     return;
   }
@@ -502,4 +502,48 @@ void aa_reset(AaWork *a) {
     printf("AA reset.\n");
   }
   a->iter = 0;
+  a->success = 0;
+  a->norm_g = 0;
+  if (a->x) {
+    memset(a->x, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->f) {
+    memset(a->f, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->g) {
+    memset(a->g, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->g_prev) {
+    memset(a->g_prev, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->y) {
+    memset(a->y, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->s) {
+    memset(a->s, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->d) {
+    memset(a->d, 0, sizeof(aa_float) * a->dim);
+  }
+  if (a->Y) {
+    memset(a->Y, 0, sizeof(aa_float) * a->dim * a->mem);
+  }
+  if (a->S) {
+    memset(a->S, 0, sizeof(aa_float) * a->dim * a->mem);
+  }
+  if (a->D) {
+    memset(a->D, 0, sizeof(aa_float) * a->dim * a->mem);
+  }
+  if (a->M) {
+    memset(a->M, 0, sizeof(aa_float) * a->mem * a->mem);
+  }
+  if (a->work) {
+    memset(a->work, 0, sizeof(aa_float) * MAX(a->mem, a->dim));
+  }
+  if (a->ipiv) {
+    memset(a->ipiv, 0, sizeof(blas_int) * a->mem);
+  }
+  if (a->x_work) {
+    memset(a->x_work, 0, sizeof(aa_float) * a->dim);
+  }
 }
