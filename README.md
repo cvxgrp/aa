@@ -206,10 +206,9 @@ To change these, compile with:
 ## Building the Python bindings from source
 
 ```bash
-cd python
 pip install cython numpy
-python setup.py build_ext --inplace
-python example.py
+pip install -e .
+python python/example.py
 ```
 
 The bindings `#include` the C source directly, so no separate library is

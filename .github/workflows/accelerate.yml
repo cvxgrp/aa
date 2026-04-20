@@ -1,0 +1,31 @@
+---
+name: Accelerate
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  macos-accelerate:
+    name: macOS / Accelerate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test against Apple Accelerate
+        run: |
+          set -euo pipefail
+          make clean
+          make LDLIBS="-framework Accelerate"
+          make test LDLIBS="-framework Accelerate"
+          # Confirm we actually linked against Accelerate (and *not* brew BLAS).
+          otool -L out/run_tests | tee /tmp/otool.txt
+          grep -q Accelerate.framework /tmp/otool.txt
+          if grep -qE 'libblas|libopenblas|liblapack' /tmp/otool.txt; then
+            echo "ERROR: linked against a non-Accelerate BLAS/LAPACK" >&2
+            exit 1
+          fi

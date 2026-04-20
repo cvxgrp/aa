@@ -1,0 +1,117 @@
+---
+name: Publish to PyPI
+
+# Fires on tag pushes matching v*. workflow_dispatch is also enabled so the
+# wheel build path can be exercised without actually cutting a release —
+# publish steps are gated on the tag event.
+on:
+  push:
+    tags: ['v*']
+  # Run on PRs that touch the wheel-build surface so we don't discover
+  # a broken release path at tag-cut time. The `publish` job is gated
+  # on `github.event_name == 'push'`, so PR runs build and smoke-test
+  # wheels without uploading anything.
+  pull_request:
+    paths:
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'MANIFEST.in'
+      - 'python/aapy.pyx'
+      - 'src/**'
+      - 'include/**'
+      - 'tests/test_wheel.py'
+      - '.github/workflows/publish.yml'
+  workflow_dispatch:
+
+jobs:
+  sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade build
+      - run: python -m build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    name: Build wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up OpenBLAS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "0.3.27"
+          $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/v$version/OpenBLAS-$version-x64.zip"
+          $staging = "$env:GITHUB_WORKSPACE\openblas-staging"
+          Invoke-WebRequest -Uri $url -OutFile openblas.zip
+          Expand-Archive -Path openblas.zip -DestinationPath $staging
+          # The zip sometimes extracts flat (bin/include/lib at top), sometimes
+          # nested under a version folder. Locate libopenblas.lib and use its
+          # grandparent as OPENBLAS_ROOT so setup.py and delvewheel agree on
+          # a single layout.
+          $libFile = Get-ChildItem $staging -Recurse -Filter libopenblas.lib | Select-Object -First 1
+          if (-not $libFile) { throw "libopenblas.lib not found under $staging" }
+          # Use forward slashes — backslashes get eaten by cibuildwheel's
+          # CIBW_ENVIRONMENT_WINDOWS shlex parser. MSVC link.exe and
+          # delvewheel both accept forward slashes on Windows.
+          $root = ($libFile.Directory.Parent.FullName) -replace '\\','/'
+          Write-Host "OPENBLAS_ROOT=$root"
+          Get-ChildItem $libFile.Directory.Parent.FullName | Format-Table Name
+          "OPENBLAS_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: pypa/cibuildwheel@v3.4.1
+        env:
+          # setup.py reads OPENBLAS_ROOT at build time. cibuildwheel v3 no
+          # longer substitutes `{env:...}` in repair commands, so we also
+          # inject the resolved path directly into the delvewheel repair
+          # command (which overrides pyproject.toml's default).
+          CIBW_ENVIRONMENT_WINDOWS: OPENBLAS_ROOT=${{ env.OPENBLAS_ROOT }}
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
+            delvewheel repair --add-path ${{ env.OPENBLAS_ROOT }}/bin
+            -w {dest_dir} {wheel}
+          # On PR runs, only build cp312 to keep CI time reasonable.
+          # Tag pushes and workflow_dispatch use the full matrix from
+          # pyproject.toml ([tool.cibuildwheel].build).
+          CIBW_BUILD: ${{ github.event_name == 'pull_request' && 'cp312-*' || '' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  publish:
+    name: Publish to PyPI
+    # Wheels job has `fail-fast: false` + matrix, so `needs: wheels` only
+    # succeeds if *every* OS wheel built AND its smoke test passed
+    # (cibuildwheel's `test-command` in pyproject.toml).
+    needs: [sdist, wheels]
+    runs-on: ubuntu-latest
+    # Only publish on a real tag push — not on workflow_dispatch dry runs.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/aa
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # Uses PyPI trusted publishing (OIDC) — no API token needed.
