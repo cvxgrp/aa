@@ -14,6 +14,13 @@ import platform
 from setuptools import Extension, setup
 from Cython.Build import cythonize
 
+# Keep enough metadata here for legacy setuptools code paths (`setup.py
+# develop`, `setup.py egg_info`, older pip editable installs) to avoid
+# synthesizing an `UNKNOWN` distribution. The canonical project metadata
+# still lives in pyproject.toml.
+NAME = "anderson-acceleration"
+VERSION = "0.0.1"
+
 include_dirs = ["include"]
 library_dirs = []
 libraries = []
@@ -51,4 +58,9 @@ aa_extension = Extension(
     extra_link_args=extra_link_args,
 )
 
-setup(ext_modules=cythonize([aa_extension], language_level=3))
+setup(
+    name=NAME,
+    version=VERSION,
+    install_requires=["numpy"],
+    ext_modules=cythonize([aa_extension], language_level=3),
+)

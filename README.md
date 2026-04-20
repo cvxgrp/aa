@@ -209,6 +209,7 @@ To change these, compile with:
 ## Building the Python bindings from source
 
 ```bash
+python -m pip install --upgrade pip
 pip install cython numpy
 pip install -e .
 python python/example.py
@@ -216,6 +217,10 @@ python python/example.py
 
 The bindings `#include` the C source directly, so no separate library is
 needed.
+
+Editable installs are expected to use a recent `pip` that supports modern
+PEP 517/660 builds. If your environment falls back to `setup.py develop`,
+upgrade `pip` first and install inside a virtual environment.
 
 ## Citing
 
