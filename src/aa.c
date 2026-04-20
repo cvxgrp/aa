@@ -344,8 +344,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
-  /* work is only ever used as a len-sized (<=mem) scratch buffer */
-  a->work = (aa_float *)calloc(a->mem, sizeof(aa_float));
+  /* work is used as a len-sized (<=mem) scratch in solve(), but as a
+   * dim-sized scratch in aa_safeguard(); size for the larger of the two. */
+  a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
   a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
 
   if (relaxation != 1.0) {
