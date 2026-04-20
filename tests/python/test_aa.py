@@ -86,6 +86,22 @@ def test_construct_dim_one():
     w.safeguard(f, x)
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        (dict(dim=0, mem=MEM), "dim must be positive"),
+        (dict(dim=DIM, mem=-1), "mem must be non-negative"),
+        (dict(dim=DIM, mem=MEM, regularization=-1.0), "regularization must be non-negative"),
+        (dict(dim=DIM, mem=MEM, relaxation=3.0), "relaxation must be in \\[0, 2\\]"),
+        (dict(dim=DIM, mem=MEM, safeguard_factor=-1.0), "safeguard_factor must be non-negative"),
+        (dict(dim=DIM, mem=MEM, max_weight_norm=0.0), "max_weight_norm must be positive"),
+    ],
+)
+def test_construct_invalid_args_raise_value_error(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        aa.AndersonAccelerator(**kwargs)
+
+
 def test_dim_one_accelerates():
     """End-to-end exercise at dim=1 — the 1-D quadratic f(x) = 0.5 x^2 - x."""
     w = aa.AndersonAccelerator(1, MEM, type1=True, regularization=1e-8)
