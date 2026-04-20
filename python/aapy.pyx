@@ -19,6 +19,18 @@ cdef class AndersonAccelerator(object):
     def __cinit__(self, dim, mem, type1=False, regularization=1e-12,
                   relaxation=1.0, safeguard_factor=1.0, max_weight_norm=1e6,
                   verbosity=0):
+        if dim <= 0:
+            raise ValueError("dim must be positive")
+        if mem < 0:
+            raise ValueError("mem must be non-negative")
+        if regularization < 0:
+            raise ValueError("regularization must be non-negative")
+        if relaxation < 0 or relaxation > 2:
+            raise ValueError("relaxation must be in [0, 2]")
+        if safeguard_factor < 0:
+            raise ValueError("safeguard_factor must be non-negative")
+        if max_weight_norm <= 0:
+            raise ValueError("max_weight_norm must be positive")
         self._wrk = aa_init(dim, mem, type1, regularization, relaxation,
                             safeguard_factor, max_weight_norm, verbosity)
         if self._wrk is NULL:

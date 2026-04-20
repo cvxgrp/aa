@@ -238,6 +238,12 @@ static const char *test_mem_zero_is_noop(void) {
   return 0;
 }
 
+static const char *test_dim_zero_rejected(void) {
+  AaWork *a = aa_init(0, 1, 1, 1e-8, 1.0, 2.0, 1e10, 0);
+  mu_assert("aa_init(dim=0) should return NULL", a == NULL);
+  return 0;
+}
+
 /* mem=1 is the smallest non-trivial memory — exercises the len=1
  * path of the internal solve. */
 static const char *test_mem_one(void) {
@@ -400,6 +406,8 @@ static const char *all_tests(void) {
   /* Unit / edge-case tests. */
   printf("unit: mem=0 is a no-op\n");
   mu_run_test(test_mem_zero_is_noop);
+  printf("unit: dim=0 is rejected\n");
+  mu_run_test(test_dim_zero_rejected);
   printf("unit: mem=1 works\n");
   mu_run_test(test_mem_one);
   printf("unit: mem=1 works (type-II)\n");

@@ -330,7 +330,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
                 aa_float max_weight_norm, aa_int verbosity) {
   TIME_TIC
   AaWork *a;
-  if (dim < 0 || mem < 0 || regularization < 0 ||
+  if (dim <= 0 || mem < 0 || regularization < 0 ||
       relaxation < 0 || relaxation > 2 ||
       safeguard_factor < 0 || max_weight_norm <= 0) {
     printf("Invalid AA parameters.\n");
