@@ -265,7 +265,8 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
 
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
-  aa_norm = BLAS(nrm2)(&blen, a->work, &one);
+  /* on gesv failure a->work is undefined — don't report a random nrm2 */
+  aa_norm = (info == 0) ? BLAS(nrm2)(&blen, a->work, &one) : 0;
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
@@ -319,7 +320,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
-    return (AaWork *)0;
+    return NULL;
   }
   a->type1 = type1;
   a->iter = 0;
@@ -350,13 +351,15 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
+  /* work is used as a len-sized (<=mem) scratch in solve(), but as a
+   * dim-sized scratch in aa_safeguard(); size for the larger of the two. */
   a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
   a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
 
   if (relaxation != 1.0) {
     a->x_work = (aa_float *)calloc(a->dim, sizeof(aa_float));
   } else {
-    a->x_work = 0;
+    a->x_work = NULL;
   }
 
   /* If any allocation failed, free the partial workspace and bail. aa_finish
@@ -423,6 +426,9 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
   /* reset success indicator in case safeguarding called multiple times */
   a->success = 0;
 
+  /* NB: a->work is used here as a dim-sized scratch, but elsewhere (in solve)
+   * only as a len-sized (<=mem) scratch. This is why it is allocated with
+   * MAX(mem, dim) in aa_init — do not shrink it to mem. */
   /* work = x_new */
   memcpy(a->work, x_new, a->dim * sizeof(aa_float));
   /* work = x_new - f_new */
