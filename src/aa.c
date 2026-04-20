@@ -266,7 +266,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
   /* on gesv failure a->work is undefined — don't report a random nrm2 */
-  aa_norm = (info == 0) ? BLAS(nrm2)(&blen, a->work, &one) : 0;
+  aa_norm = (info == 0) ? BLAS(nrm2)(&blen, a->work, &one) : -1.0;
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
@@ -282,7 +282,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     /* reset aa for stability */
     aa_reset(a);
     TIME_TOC
-    return -aa_norm;
+    return (aa_norm < 0) ? aa_norm : -aa_norm;
   }
 
   /* here work = gamma, ie, the correct AA shifted weights */
