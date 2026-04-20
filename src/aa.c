@@ -265,7 +265,8 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
 
   /* work = M \ work, where update_accel_params has set M = S'Y or M = Y'Y */
   BLAS(gesv)(&blen, &one, a->M, &blen, a->ipiv, a->work, &blen, &info);
-  aa_norm = BLAS(nrm2)(&blen, a->work, &one);
+  /* on gesv failure a->work is undefined — don't report a random nrm2 */
+  aa_norm = (info == 0) ? BLAS(nrm2)(&blen, a->work, &one) : 0;
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
@@ -312,7 +313,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
-    return (AaWork *)0;
+    return NULL;
   }
   a->type1 = type1;
   a->iter = 0;
@@ -343,13 +344,14 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
-  a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
+  /* work is only ever used as a len-sized (<=mem) scratch buffer */
+  a->work = (aa_float *)calloc(a->mem, sizeof(aa_float));
   a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
 
   if (relaxation != 1.0) {
     a->x_work = (aa_float *)calloc(a->dim, sizeof(aa_float));
   } else {
-    a->x_work = 0;
+    a->x_work = NULL;
   }
   TIME_TOC
   return a;
