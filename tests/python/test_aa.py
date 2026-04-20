@@ -233,3 +233,51 @@ def test_create_and_destroy_many():
     for _ in range(64):
         w = aa.AndersonAccelerator(DIM, MEM)
         del w
+
+def test_readonly_arrays_rejected():
+    accel = aa.AndersonAccelerator(dim=2, mem=5)
+    f = np.array([1.0, 2.0])
+    x = np.array([0.0, 0.0])
+    
+    f_ro = f.copy()
+    f_ro.flags.writeable = False
+    with pytest.raises(ValueError, match="writeable"):
+        accel.apply(f_ro, x)
+
+    x_ro = x.copy()
+    x_ro.flags.writeable = False
+    with pytest.raises(ValueError, match="writeable"):
+        accel.apply(f, x_ro)
+
+    with pytest.raises(ValueError, match="writeable"):
+        accel.safeguard(f_ro, x)
+
+    with pytest.raises(ValueError, match="writeable"):
+        accel.safeguard(f, x_ro)
+
+def test_safeguard_rejection_restores_arrays():
+    accel = aa.AndersonAccelerator(dim=2, mem=2, safeguard_factor=0.01)
+    
+    # Simple linear contraction to ensure non-singular AA matrix
+    x = np.array([1.0, 1.0])
+    f = 0.5 * x
+    accel.apply(f, x)
+    
+    x = f.copy()
+    f = 0.5 * x
+    accel.apply(f, x)
+    
+    x = f.copy()
+    f = 0.5 * x
+    accel.apply(f, x)
+
+    # After a successful solve, we pass in a massive step
+    f_new = np.array([100.0, 100.0])
+    x_new = np.array([-100.0, -100.0])
+
+    rejected = accel.safeguard(f_new, x_new)
+    
+    assert rejected == -1
+    # Safeguard restores the last known good f and x.
+    assert not np.allclose(f_new, [100.0, 100.0])
+    assert not np.allclose(x_new, [-100.0, -100.0])
