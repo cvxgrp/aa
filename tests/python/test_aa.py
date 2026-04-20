@@ -178,6 +178,20 @@ def test_accepts_row_vector():
     w.apply(f, x)
 
 
+def test_python_sequences_rejected():
+    w = aa.AndersonAccelerator(DIM, MEM)
+    with pytest.raises(TypeError, match="numpy.ndarray"):
+        w.apply([0.0] * DIM, np.zeros(DIM))
+    with pytest.raises(TypeError, match="numpy.ndarray"):
+        w.apply(np.zeros(DIM), tuple([0.0] * DIM))
+
+
+def test_dim_one_scalar_array_rejected():
+    w = aa.AndersonAccelerator(1, MEM)
+    with pytest.raises(ValueError, match="Incorrect input dimension"):
+        w.apply(np.array(1.0), np.array([0.0]))
+
+
 # ---------------------------------------------------------------------------
 # reset
 # ---------------------------------------------------------------------------

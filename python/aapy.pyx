@@ -37,23 +37,26 @@ cdef class AndersonAccelerator(object):
             raise MemoryError("aa_init failed")
         self._dim = dim
 
-    def _validate(self, f, x):
-        # atleast_1d undoes np.squeeze's collapse of shape-(1,) to shape-() —
-        # without it, dim=1 users cannot pass a 1-D array through validation.
-        f = np.atleast_1d(np.squeeze(f))
-        x = np.atleast_1d(np.squeeze(x))
-        if f.shape != (self._dim,) or x.shape != (self._dim,):
+    def _normalize_array(self, arr, name):
+        if not isinstance(arr, np.ndarray):
+            raise TypeError(f"{name} must be a numpy.ndarray")
+        if arr.dtype != np.float64:
+            raise TypeError("arrays must be float64")
+        if arr.shape == (self._dim,):
+            view = arr
+        elif arr.shape == (self._dim, 1) or arr.shape == (1, self._dim):
+            view = arr.reshape(self._dim)
+        else:
             raise ValueError("Incorrect input dimension")
         # aa_apply / aa_safeguard write through these pointers, so we must
         # not silently hand the C code a copy. Reject non-contiguous input
         # rather than copying and dropping the writes on the floor.
-        if not f.flags['C_CONTIGUOUS'] or not f.flags['WRITEABLE']:
-            raise ValueError("first array must be C-contiguous and writeable")
-        if not x.flags['C_CONTIGUOUS'] or not x.flags['WRITEABLE']:
-            raise ValueError("second array must be C-contiguous and writeable")
-        if f.dtype != np.float64 or x.dtype != np.float64:
-            raise TypeError("arrays must be float64")
-        return f, x
+        if not view.flags['C_CONTIGUOUS'] or not view.flags['WRITEABLE']:
+            raise ValueError(f"{name} must be C-contiguous and writeable")
+        return view
+
+    def _validate(self, f, x):
+        return self._normalize_array(f, "first array"), self._normalize_array(x, "second array")
 
     def apply(self, f, x):
         f, x = self._validate(f, x)
