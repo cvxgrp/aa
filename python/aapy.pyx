@@ -37,8 +37,8 @@ cdef class AndersonAccelerator(object):
         # rather than copying and dropping the writes on the floor.
         if not f.flags['C_CONTIGUOUS'] or not f.flags['WRITEABLE']:
             raise ValueError("first array must be C-contiguous and writeable")
-        if not x.flags['C_CONTIGUOUS']:
-            raise ValueError("second array must be C-contiguous")
+        if not x.flags['C_CONTIGUOUS'] or not x.flags['WRITEABLE']:
+            raise ValueError("second array must be C-contiguous and writeable")
         if f.dtype != np.float64 or x.dtype != np.float64:
             raise TypeError("arrays must be float64")
         return f, x
