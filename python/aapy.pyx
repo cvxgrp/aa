@@ -26,8 +26,10 @@ cdef class AndersonAccelerator(object):
         self._dim = dim
 
     def _validate(self, f, x):
-        f = np.squeeze(f)
-        x = np.squeeze(x)
+        # atleast_1d undoes np.squeeze's collapse of shape-(1,) to shape-() —
+        # without it, dim=1 users cannot pass a 1-D array through validation.
+        f = np.atleast_1d(np.squeeze(f))
+        x = np.atleast_1d(np.squeeze(x))
         if f.shape != (self._dim,) or x.shape != (self._dim,):
             raise ValueError("Incorrect input dimension")
         # aa_apply / aa_safeguard write through these pointers, so we must
@@ -58,4 +60,3 @@ cdef class AndersonAccelerator(object):
 
     def __dealloc__(self):
         aa_finish(self._wrk)
-

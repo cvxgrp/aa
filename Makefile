@@ -36,5 +36,5 @@ purge: clean
 test: $(OUT)/run_tests
 
 $(OUT)/run_tests: test/run_tests.c $(OUT)/libaa.a
-	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack
+	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack -lm
 
