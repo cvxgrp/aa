@@ -1,6 +1,7 @@
 /* Gradient descent (GD) on convex quadratic */
 #include "aa.h"
 #include "aa_blas.h"
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,65 +52,80 @@ static aa_float rand_float(void) {
   return 2 * (((aa_float)rand()) / RAND_MAX) - 1;
 }
 
-/*
- * Usage:
- *   out/gd [memory [type1 [dimension [step_size [seed [iters
- *           [regularization [relaxation [safeguard_tolerance [max_aa_norm]]]]]]]]]]
- *
- * Later arguments imply (and override) earlier ones; omit trailing args to
- * use the compiled-in defaults.
- */
+static void print_usage(const char *prog) {
+  fprintf(stderr,
+    "Usage: %s [OPTIONS]\n"
+    "\n"
+    "Gradient descent with Anderson Acceleration on a random convex quadratic.\n"
+    "\n"
+    "Options:\n"
+    "  -m, --mem=N                   AA memory / lookback (default %d)\n"
+    "      --type1                   use type-I AA (default)\n"
+    "      --type2                   use type-II AA\n"
+    "  -n, --dim=N                   problem dimension (default %d)\n"
+    "  -s, --step=F                  gradient step size (default %g)\n"
+    "      --seed=N                  PRNG seed (default %d)\n"
+    "      --iters=N                 iteration count (default %d)\n"
+    "      --regularization=F        AA regularization (default %g)\n"
+    "      --relaxation=F            AA mixing in [0, 2] (default %g)\n"
+    "      --safeguard-tolerance=F   AA safeguard factor (default %g)\n"
+    "      --max-aa-norm=F           AA weight-norm cap (default %g)\n"
+    "  -h, --help                    show this message and exit\n",
+    prog, MEM, DIM, (double)STEPSIZE, SEED, ITERS,
+    (double)REGULARIZATION, (double)RELAXATION,
+    (double)SAFEGUARD_TOLERANCE, (double)MAX_AA_NORM);
+}
+
 int main(int argc, char **argv) {
   aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
   aa_int i, one = 1;
   aa_int verbosity = VERBOSITY;
-  aa_float neg_step_size = -STEPSIZE;
+  aa_float step_size = STEPSIZE;
   aa_float regularization = REGULARIZATION;
   aa_float relaxation = RELAXATION;
   aa_float safeguard_tolerance = SAFEGUARD_TOLERANCE;
   aa_float max_aa_norm = MAX_AA_NORM;
+  aa_float neg_step_size;
   aa_float err = 0;
   aa_float *x, *xprev, *Qhalf, *Q, zerof = 0.0, onef = 1.0;
   _timer aa_timer;
   aa_float aa_time = 0;
 
-  printf("Usage: 'out/gd memory type1 dimension step_size seed iters "
-         "regularization relaxation safeguard_tolerance max_aa_norm'\n");
+  static struct option long_opts[] = {
+    {"mem",                 required_argument, 0, 'm'},
+    {"type1",               no_argument,       0, '1'},
+    {"type2",               no_argument,       0, '2'},
+    {"dim",                 required_argument, 0, 'n'},
+    {"step",                required_argument, 0, 's'},
+    {"seed",                required_argument, 0,  1 },
+    {"iters",               required_argument, 0,  2 },
+    {"regularization",      required_argument, 0,  3 },
+    {"relaxation",          required_argument, 0,  4 },
+    {"safeguard-tolerance", required_argument, 0,  5 },
+    {"max-aa-norm",         required_argument, 0,  6 },
+    {"help",                no_argument,       0, 'h'},
+    {0, 0, 0, 0}
+  };
 
-  switch (argc - 1) {
-  case 10:
-    max_aa_norm = atof(argv[10]);
-    /* fallthrough */
-  case 9:
-    safeguard_tolerance = atof(argv[9]);
-    /* fallthrough */
-  case 8:
-    relaxation = atof(argv[8]);
-    /* fallthrough */
-  case 7:
-    regularization = atof(argv[7]);
-    /* fallthrough */
-  case 6:
-    iters = atoi(argv[6]);
-    /* fallthrough */
-  case 5:
-    seed = atoi(argv[5]);
-    /* fallthrough */
-  case 4:
-    neg_step_size = -atof(argv[4]);
-    /* fallthrough */
-  case 3:
-    n = atoi(argv[3]);
-    /* fallthrough */
-  case 2:
-    type1 = atoi(argv[2]);
-    /* fallthrough */
-  case 1:
-    memory = atoi(argv[1]);
-    break;
-  default:
-    printf("Running default parameters.\n");
+  int opt;
+  while ((opt = getopt_long(argc, argv, "m:n:s:h", long_opts, NULL)) != -1) {
+    switch (opt) {
+    case 'm': memory = atoi(optarg); break;
+    case '1': type1 = 1; break;
+    case '2': type1 = 0; break;
+    case 'n': n = atoi(optarg); break;
+    case 's': step_size = atof(optarg); break;
+    case  1 : seed = atoi(optarg); break;
+    case  2 : iters = atoi(optarg); break;
+    case  3 : regularization = atof(optarg); break;
+    case  4 : relaxation = atof(optarg); break;
+    case  5 : safeguard_tolerance = atof(optarg); break;
+    case  6 : max_aa_norm = atof(optarg); break;
+    case 'h': print_usage(argv[0]); return 0;
+    default:  print_usage(argv[0]); return 2;
+    }
   }
+  neg_step_size = -step_size;
 
   x = (aa_float *)malloc(sizeof(aa_float) * n);
   xprev = (aa_float *)malloc(sizeof(aa_float) * n);

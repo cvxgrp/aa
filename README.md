@@ -54,7 +54,8 @@ C
 ----
 
 At the command prompt type `make` to compile the library and the example. The
-example can be run by `out/gd`.
+example can be run by `out/gd` (pass `--help` for the full list of flags, e.g.
+`out/gd --mem 10 --dim 500 --type2`).
 
 The C API is as follows:
 
