@@ -1,0 +1,78 @@
+---
+name: MKL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  linux-mkl:
+    name: Linux / Intel MKL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add Intel oneAPI apt repository
+        run: |
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | sudo gpg --dearmor --output /usr/share/keyrings/oneapi-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+
+      - name: Install MKL
+        run: sudo apt-get install -y --no-install-recommends intel-oneapi-mkl-devel
+
+      - name: Build and test with MKL (single-dynamic interface)
+        shell: bash
+        run: |
+          # NB: oneAPI's setvars.sh references some env vars without checking
+          # they are set, so we can't enable `-u` (nounset) here.
+          set -eo pipefail
+          source /opt/intel/oneapi/setvars.sh
+          make clean
+          make LDLIBS="-lmkl_rt -lpthread -lm -ldl"
+          make test LDLIBS="-lmkl_rt -lpthread -lm -ldl"
+          # Confirm we actually linked against MKL.
+          ldd out/run_tests | tee /tmp/ldd.txt
+          grep -q libmkl_rt /tmp/ldd.txt
+
+  windows-mkl:
+    name: Windows / Intel MKL
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-activate-base: true
+          activate-environment: ""
+
+      - name: Install MKL from conda-forge
+        run: conda install -y -c conda-forge mkl mkl-devel intel-openmp
+
+      - name: Build the Python extension against MKL
+        env:
+          AA_WINDOWS_BLAS: mkl
+        run: |
+          # conda-forge installs MKL headers under <base>/Library/include and
+          # libs under <base>/Library/lib on Windows.
+          export MKL_ROOT="$CONDA/Library"
+          python -m pip install --upgrade pip setuptools wheel cython numpy
+          python -m pip install --no-build-isolation -v .
+
+      - name: Run wheel smoke test against MKL-linked extension
+        run: |
+          # Make sure MKL DLLs resolve at import time.
+          export PATH="$CONDA/Library/bin:$PATH"
+          python tests/test_wheel.py

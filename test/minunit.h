@@ -13,8 +13,12 @@
     if (!(test))                                                               \
       return message;                                                          \
   } while (0)
+/* Announce the test to stderr before running so a crashing test still
+ * leaves a breadcrumb in CI logs (stdout may be block-buffered, stderr
+ * is not). */
 #define mu_run_test(test)                                                      \
   do {                                                                         \
+    fprintf(stderr, "-> %s\n", #test);                                         \
     const char *message = test();                                              \
     tests_run++;                                                               \
     if (message)                                                               \

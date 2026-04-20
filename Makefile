@@ -6,6 +6,12 @@ OBJECTS = src/aa.o
 PROFILING = 0
 CFLAGS += -g -Wall -O3 -Iinclude -DPROFILING=$(PROFILING)
 
+# BLAS/LAPACK linkage — override to swap in MKL, Accelerate, OpenBLAS, etc.
+#   e.g.  make LDLIBS="-lmkl_rt -lpthread -lm -ldl"
+#         make LDLIBS="-framework Accelerate"
+# `-lm` is needed by run_tests (sqrt, fabs); harmless for gd.
+LDLIBS ?= -lblas -llapack -lm
+
 SRC_FILES = $(wildcard src/*.c)
 INC_FILES = $(wildcard include/*.h)
 
@@ -26,17 +32,17 @@ $(OUT)/libaa.a: $(OBJECTS)
 	- ranlib $@
 
 $(OUT)/gd: examples/gd.c $(OUT)/libaa.a
-	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
 	@rm -rf $(OBJECTS)
 purge: clean
 	@rm -rf $(OUT)
 
-test: $(OUT)/run_tests
+test: $(OUT)/run_tests $(OUT)/gd
 	$(OUT)/run_tests
 	test/check_gd_convergence.sh
 
 $(OUT)/run_tests: test/run_tests.c $(OUT)/libaa.a
-	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack -lm
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
