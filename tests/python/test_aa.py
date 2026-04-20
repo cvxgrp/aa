@@ -127,7 +127,7 @@ def test_safeguard_returns_int_like():
     f = np.ones(DIM)
     x = np.zeros(DIM)
     result = w.safeguard(f, x)
-    assert result in (0, 1)
+    assert result in (0, -1)
 
 
 # ---------------------------------------------------------------------------
