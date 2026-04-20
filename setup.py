@@ -1,8 +1,6 @@
-"""Root-level build script — drives wheel building for PyPI.
-
-The Cython source is python/aapy.pyx (canonical; also used by the in-tree
-`cd python && python setup.py build_ext --inplace` dev flow). BLAS/LAPACK
-linkage is picked per platform:
+"""Root-level build script — drives wheel building for PyPI and local
+development installs (`pip install -e .`). BLAS/LAPACK linkage is picked
+per platform:
 
     Linux   : -lopenblas -llapack (from manylinux yum packages)
     macOS   : -framework Accelerate
