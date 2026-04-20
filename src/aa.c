@@ -404,6 +404,9 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
   /* reset success indicator in case safeguarding called multiple times */
   a->success = 0;
 
+  /* NB: a->work is used here as a dim-sized scratch, but elsewhere (in solve)
+   * only as a len-sized (<=mem) scratch. This is why it is allocated with
+   * MAX(mem, dim) in aa_init — do not shrink it to mem. */
   /* work = x_new */
   memcpy(a->work, x_new, a->dim * sizeof(aa_float));
   /* work = x_new - f_new */
