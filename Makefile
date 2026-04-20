@@ -1,10 +1,12 @@
 # MAKEFILE for aa
-.PHONY: default clean purge
+.PHONY: default clean purge test
 
 OBJECTS = src/aa.o
 
 PROFILING = 0
 CFLAGS += -g -Wall -O3 -Iinclude -DPROFILING=$(PROFILING)
+# Override on the command line to link against MKL, OpenBLAS-only, etc.
+LDLIBS ?= -lblas -llapack
 
 SRC_FILES = $(wildcard src/*.c)
 INC_FILES = $(wildcard include/*.h)
@@ -26,15 +28,18 @@ $(OUT)/libaa.a: $(OBJECTS)
 	- ranlib $@
 
 $(OUT)/gd: examples/gd.c $(OUT)/libaa.a
-	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
 	@rm -rf $(OBJECTS)
 purge: clean
 	@rm -rf $(OUT)
 
+# `make test` builds and runs the suite; use `make $(OUT)/run_tests` if you
+# only want to build it.
 test: $(OUT)/run_tests
+	$(OUT)/run_tests
 
 $(OUT)/run_tests: test/run_tests.c $(OUT)/libaa.a
-	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 

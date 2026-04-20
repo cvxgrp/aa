@@ -52,8 +52,12 @@ static aa_float rand_float(void) {
 }
 
 /*
- * out/gd memory dimension step_size type1 seed iters regularization
+ * Usage:
+ *   out/gd [memory [type1 [dimension [step_size [seed [iters
+ *           [regularization [relaxation [safeguard_tolerance [max_aa_norm]]]]]]]]]]
  *
+ * Later arguments imply (and override) earlier ones; omit trailing args to
+ * use the compiled-in defaults.
  */
 int main(int argc, char **argv) {
   aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
@@ -75,22 +79,31 @@ int main(int argc, char **argv) {
   switch (argc - 1) {
   case 10:
     max_aa_norm = atof(argv[10]);
+    /* fallthrough */
   case 9:
     safeguard_tolerance = atof(argv[9]);
+    /* fallthrough */
   case 8:
     relaxation = atof(argv[8]);
+    /* fallthrough */
   case 7:
     regularization = atof(argv[7]);
+    /* fallthrough */
   case 6:
     iters = atoi(argv[6]);
+    /* fallthrough */
   case 5:
     seed = atoi(argv[5]);
+    /* fallthrough */
   case 4:
     neg_step_size = -atof(argv[4]);
+    /* fallthrough */
   case 3:
     n = atoi(argv[3]);
+    /* fallthrough */
   case 2:
     type1 = atoi(argv[2]);
+    /* fallthrough */
   case 1:
     memory = atoi(argv[1]);
     break;
