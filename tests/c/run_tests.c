@@ -311,6 +311,39 @@ static const char *test_reset_matches_fresh_init(void) {
   return 0;
 }
 
+/* reset must clear any "last AA step succeeded" state so a subsequent
+ * safeguard call cannot roll inputs back to pre-reset iterates. */
+static const char *test_reset_clears_stale_safeguard_state(void) {
+  AaWork *a = aa_init(2, 2, 1, 1e-8, 1.0, 1.0, 1e10, 0);
+  aa_float x[2] = {1.0, 1.0};
+  aa_float f[2] = {0.5, 0.5};
+
+  aa_apply(f, x, a);
+
+  memcpy(x, f, sizeof(x));
+  f[0] *= 0.5;
+  f[1] *= 0.5;
+  aa_apply(f, x, a);
+
+  memcpy(x, f, sizeof(x));
+  f[0] *= 0.5;
+  f[1] *= 0.5;
+  aa_float aa_norm = aa_apply(f, x, a);
+  mu_assert("expected a successful AA step before reset", aa_norm > 0);
+
+  aa_reset(a);
+
+  aa_float f_new[2] = {3.0, 4.0};
+  aa_float x_new[2] = {1.0, 2.0};
+  aa_int safeguard = aa_safeguard(f_new, x_new, a);
+  mu_assert("safeguard after reset should be a no-op", safeguard == 0);
+  mu_assert("reset should prevent stale rollback of f_new", f_new[0] == 3.0);
+  mu_assert("reset should prevent stale rollback of x_new", x_new[0] == 1.0);
+
+  aa_finish(a);
+  return 0;
+}
+
 /* On a moderately-conditioned problem AA should comfortably beat plain GD
  * at a fixed iteration budget. This is the headline claim of the library,
  * so regress hard. */
@@ -412,6 +445,8 @@ static const char *all_tests(void) {
   mu_run_test(test_first_iter_is_noop_on_f);
   printf("unit: aa_reset matches a fresh aa_init\n");
   mu_run_test(test_reset_matches_fresh_init);
+  printf("unit: aa_reset clears stale safeguard state\n");
+  mu_run_test(test_reset_clears_stale_safeguard_state);
   printf("unit: cyclic buffer survives a long run\n");
   mu_run_test(test_cyclic_buffer_long_run);
   printf("unit: AA accelerates convergence vs plain GD\n");

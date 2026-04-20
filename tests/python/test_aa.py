@@ -281,3 +281,29 @@ def test_safeguard_rejection_restores_arrays():
     # Safeguard restores the last known good f and x.
     assert not np.allclose(f_new, [100.0, 100.0])
     assert not np.allclose(x_new, [-100.0, -100.0])
+
+
+def test_reset_clears_stale_safeguard_state():
+    accel = aa.AndersonAccelerator(dim=2, mem=2, safeguard_factor=1.0)
+
+    x = np.array([1.0, 1.0])
+    f = 0.5 * x
+    accel.apply(f, x)
+
+    x = f.copy()
+    f = 0.5 * x
+    accel.apply(f, x)
+
+    x = f.copy()
+    f = 0.5 * x
+    assert accel.apply(f, x) > 0
+
+    accel.reset()
+
+    f_new = np.array([3.0, 4.0])
+    x_new = np.array([1.0, 2.0])
+    accepted = accel.safeguard(f_new, x_new)
+
+    assert accepted == 0
+    np.testing.assert_array_equal(f_new, [3.0, 4.0])
+    np.testing.assert_array_equal(x_new, [1.0, 2.0])
