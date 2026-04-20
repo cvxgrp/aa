@@ -50,7 +50,8 @@ def main():
     Qh = rng.standard_normal((dim, dim)) / np.sqrt(dim)
     Q = Qh.T @ Qh + 1e-3 * np.eye(dim)
     q = rng.standard_normal(dim)
-    step = 1.0 / np.linalg.eigvalsh(Q).max()
+    eigs = np.linalg.eigvalsh(Q)
+    step = 2.0 / (eigs.min() + eigs.max())  # optimal GD step for a quadratic
     x0 = rng.standard_normal(dim)
 
     curves = {
