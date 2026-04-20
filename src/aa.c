@@ -309,7 +309,14 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
                 aa_float relaxation, aa_float safeguard_factor,
                 aa_float max_weight_norm, aa_int verbosity) {
   TIME_TIC
-  AaWork *a = (AaWork *)calloc(1, sizeof(AaWork));
+  AaWork *a;
+  if (dim < 0 || mem < 0 || regularization < 0 ||
+      relaxation < 0 || relaxation > 2 ||
+      safeguard_factor < 0 || max_weight_norm <= 0) {
+    printf("Invalid AA parameters.\n");
+    return (AaWork *)0;
+  }
+  a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
     printf("Failed to allocate memory for AA.\n");
     return (AaWork *)0;
@@ -350,6 +357,16 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
     a->x_work = (aa_float *)calloc(a->dim, sizeof(aa_float));
   } else {
     a->x_work = 0;
+  }
+
+  /* If any allocation failed, free the partial workspace and bail. aa_finish
+   * is safe against NULL members. */
+  if (!a->x || !a->f || !a->g || !a->g_prev || !a->y || !a->s || !a->d ||
+      !a->Y || !a->S || !a->D || !a->M || !a->work || !a->ipiv ||
+      (relaxation != 1.0 && !a->x_work)) {
+    printf("Failed to allocate memory for AA.\n");
+    aa_finish(a);
+    return (AaWork *)0;
   }
   TIME_TOC
   return a;
@@ -392,6 +409,11 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
   blas_int one = 1;
   aa_float neg_onef = -1.0;
   aa_float norm_diff;
+  if (a->mem <= 0) {
+    /* degenerate workspace, nothing to safeguard against */
+    TIME_TOC
+    return 0;
+  }
   if (!a->success) {
     /* last AA update was not successful, no need for safeguarding */
     TIME_TOC
@@ -448,6 +470,9 @@ void aa_finish(AaWork *a) {
 
 void aa_reset(AaWork *a) {
   /* to reset we simply set a->iter = 0 */
+  if (!a) {
+    return;
+  }
   if (a->verbosity > 0) {
     printf("AA reset.\n");
   }
