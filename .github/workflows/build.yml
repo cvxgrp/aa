@@ -19,7 +19,7 @@ jobs:
       - run: make test
       - run: out/run_tests
       - name: Run gd example with varied flags
-        run: scripts/check_gd_convergence.sh
+        run: test/check_gd_convergence.sh
 
   mac:
     runs-on: macos-latest
@@ -30,7 +30,7 @@ jobs:
       - run: make test
       - run: out/run_tests
       - name: Run gd example with varied flags
-        run: scripts/check_gd_convergence.sh
+        run: test/check_gd_convergence.sh
 
   python:
     runs-on: ubuntu-latest

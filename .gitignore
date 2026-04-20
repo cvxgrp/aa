@@ -6,3 +6,4 @@ python/aapy.c
 python/build
 python/.*
 .pytest_cache
+.claude/
