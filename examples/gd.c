@@ -57,8 +57,9 @@ static aa_float rand_float(void) {
  */
 int main(int argc, char **argv) {
   aa_int type1 = TYPE1, n = DIM, iters = ITERS, memory = MEM, seed = SEED;
-  aa_int i, one = 1;
+  aa_int i;
   aa_int verbosity = VERBOSITY;
+  blas_int bn, bone = 1;
   aa_float neg_step_size = -STEPSIZE;
   aa_float regularization = REGULARIZATION;
   aa_float relaxation = RELAXATION;
@@ -113,8 +114,9 @@ int main(int argc, char **argv) {
     Qhalf[i] = rand_float();
   }
 
+  bn = (blas_int)n;
   BLAS(gemm)
-  ("Trans", "No", &n, &n, &n, &onef, Qhalf, &n, Qhalf, &n, &zerof, Q, &n);
+  ("Trans", "No", &bn, &bn, &bn, &onef, Qhalf, &bn, Qhalf, &bn, &zerof, Q, &bn);
 
   /* add small amount regularization */
   for (i = 0; i < n; i++) {
@@ -133,13 +135,13 @@ int main(int argc, char **argv) {
     memcpy(xprev, x, sizeof(aa_float) * n);
     /* x = x - step_size * Q * xprev */
     BLAS(gemv)
-    ("No", &n, &n, &neg_step_size, Q, &n, xprev, &one, &onef, x, &one);
+    ("No", &bn, &bn, &neg_step_size, Q, &bn, xprev, &bone, &onef, x, &bone);
 
     _tic(&aa_timer);
     aa_safeguard(x, xprev, a);
     aa_time += _tocq(&aa_timer);
 
-    err = BLAS(nrm2)(&n, x, &one);
+    err = BLAS(nrm2)(&bn, x, &bone);
     if (i % PRINT_INTERVAL == 0) {
       printf("Iter: %i, Err %.4e\n", i, err);
     }
