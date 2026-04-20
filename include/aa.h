@@ -9,7 +9,11 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef SFLOAT
 typedef double aa_float;
+#else
+typedef float aa_float;
+#endif
 typedef int aa_int;
 
 typedef struct ACCEL_WORK AaWork;
