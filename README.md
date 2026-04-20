@@ -58,7 +58,7 @@ make                                           # default: -lblas -llapack
 make LDLIBS="-framework Accelerate"            # macOS, Apple Accelerate
 make LDLIBS="-lopenblas"                       # OpenBLAS (bundles LAPACK)
 make LDLIBS="-lmkl_rt -lpthread -lm -ldl"      # Intel MKL
-make test && out/run_tests                     # run the test suite
+make test                                      # run the test suite
 out/gd                                         # run the GD+AA example
 ```
 
