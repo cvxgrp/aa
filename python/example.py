@@ -1,6 +1,5 @@
 # min (1/2) x'Q'x - q'x
 
-from __future__ import print_function
 import numpy as np
 import matplotlib.pyplot as plt
 import aa
