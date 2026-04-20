@@ -42,7 +42,7 @@ for i = 0, 1, 2, ...
 ### Python
 
 ```bash
-pip install aa
+pip install anderson-acceleration
 ```
 
 The wheel bundles an optimized BLAS/LAPACK (Apple's Accelerate on macOS,
