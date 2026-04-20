@@ -1,5 +1,5 @@
 # MAKEFILE for aa
-.PHONY: default clean purge
+.PHONY: default clean purge test
 
 OBJECTS = src/aa.o
 
@@ -34,6 +34,8 @@ purge: clean
 	@rm -rf $(OUT)
 
 test: $(OUT)/run_tests
+	$(OUT)/run_tests
+	test/check_gd_convergence.sh
 
 $(OUT)/run_tests: test/run_tests.c $(OUT)/libaa.a
 	$(CC) $(CFLAGS) -o $@ $^ -lblas -llapack -lm
