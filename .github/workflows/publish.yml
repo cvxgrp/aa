@@ -103,7 +103,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     environment:
       name: pypi
-      url: https://pypi.org/p/aa
+      url: https://pypi.org/p/anderson-acceleration
     permissions:
       id-token: write
     steps:
