@@ -17,18 +17,23 @@ typedef struct ACCEL_WORK AaWork;
 /**
  * Initialize Anderson Acceleration, allocates memory.
  *
+ * NOTE: an AaWork instance is not thread-safe; allocate one per thread.
+ *
  * @param dim               the dimension of the variable for AA
  * @param mem               the memory (number of past iterations used) for AA
  * @param type1             if True use type 1 AA, otherwise use type 2
- * @param regularization    type-I and type-II different, for type-I: 1e-8 works
- *                          well, type-II: more stable can use 1e-12 often
+ * @param regularization    non-negative; internally scaled by ||M||_F, so pass
+ *                          a relative value, not an absolute one. Type-I: 1e-8
+ *                          works well, type-II can use 1e-12.
  * @param relaxation        float \in [0,2], mixing parameter (1.0 is vanilla)
  * @param safeguard_factor  factor that controls safeguarding checks
  *                          larger is more aggressive but less stable
- * @param max_weight_norm   float, maximum norm of AA weights
+ * @param max_weight_norm   float > 0, reject steps whose weight norm exceeds
+ *                          this threshold
  * @param verbosity         if greater than 0 prints out various info
  *
- * @return pointer to AA workspace
+ * @return pointer to AA workspace, or NULL if parameters are invalid or memory
+ *         allocation fails
  *
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
