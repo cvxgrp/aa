@@ -34,6 +34,12 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --upgrade build
       - run: python -m build --sdist
+      - name: Smoke test sdist install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopenblas-dev liblapack-dev
+          python -m pip install dist/*.tar.gz
+          python tests/python/test_wheel.py
       - uses: actions/upload-artifact@v7
         with:
           name: sdist
@@ -82,10 +88,6 @@ jobs:
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >-
             delvewheel repair --add-path ${{ env.OPENBLAS_ROOT }}/bin
             -w {dest_dir} {wheel}
-          # On PR runs, only build cp312 to keep CI time reasonable.
-          # Tag pushes and workflow_dispatch use the full matrix from
-          # pyproject.toml ([tool.cibuildwheel].build).
-          CIBW_BUILD: ${{ github.event_name == 'pull_request' && 'cp312-*' || '' }}
 
       - uses: actions/upload-artifact@v7
         with:
