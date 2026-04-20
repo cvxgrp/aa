@@ -36,6 +36,24 @@
   tic(&__t);
 #define TIME_TOC toc(__func__, &__t);
 
+#ifdef _WIN32
+#include <windows.h>
+typedef struct timer {
+  LARGE_INTEGER tic;
+  LARGE_INTEGER toc;
+} timer;
+
+void tic(timer *t) {
+  QueryPerformanceCounter(&t->tic);
+}
+
+aa_float tocq(timer *t) {
+  LARGE_INTEGER freq;
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&t->toc);
+  return (aa_float)(t->toc.QuadPart - t->tic.QuadPart) / (aa_float)freq.QuadPart * 1e3;
+}
+#else
 #include <time.h>
 typedef struct timer {
   struct timespec tic;
@@ -60,6 +78,7 @@ aa_float tocq(timer *t) {
   }
   return (aa_float)temp.tv_sec * 1e3 + (aa_float)temp.tv_nsec / 1e6;
 }
+#endif
 
 aa_float toc(const char *str, timer *t) {
   aa_float time = tocq(t);
