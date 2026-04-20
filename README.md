@@ -45,8 +45,10 @@ for i = 0, 1, 2, ...
 pip install anderson-acceleration
 ```
 
-The wheel bundles an optimized BLAS/LAPACK (Apple's Accelerate on macOS,
-OpenBLAS on Linux and Windows), so you don't need a system BLAS installed.
+The wheel is linked against an optimized BLAS/LAPACK on every platform:
+OpenBLAS is bundled into the wheel on Linux and Windows, and Apple's
+Accelerate framework is used on macOS (already ships with the OS), so
+you don't need a system BLAS installed.
 
 ### C, from source
 
