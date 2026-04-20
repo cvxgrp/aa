@@ -96,7 +96,7 @@ for i in range(N):
 Convergence on this problem for vanilla GD vs AA-accelerated GD (Type-I and
 Type-II, both with `mem=10`):
 
-![convergence](convergence.png)
+![convergence](python/convergence.png)
 
 Type-II converges smoothly; Type-I is more aggressive and makes plateau-style
 progress as the safeguard rejects-then-accepts steps. Both beat vanilla GD by
@@ -125,7 +125,7 @@ for (int i = 0; i < N; i++) {
 aa_finish(a);
 ```
 
-See [`examples/gd.c`](examples/gd.c) for a complete runnable example
+See [`tests/c/gd.c`](tests/c/gd.c) for a complete runnable example
 (gradient descent on a random convex quadratic).
 
 ## Parameters

@@ -31,7 +31,7 @@ $(OUT)/libaa.a: $(OBJECTS)
 	$(ARCHIVE) $@ $^
 	- ranlib $@
 
-$(OUT)/gd: examples/gd.c $(OUT)/libaa.a
+$(OUT)/gd: tests/c/gd.c $(OUT)/libaa.a
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
@@ -41,8 +41,8 @@ purge: clean
 
 test: $(OUT)/run_tests $(OUT)/gd
 	$(OUT)/run_tests
-	test/check_gd_convergence.sh
+	tests/c/check_gd_convergence.sh
 
-$(OUT)/run_tests: test/run_tests.c $(OUT)/libaa.a
+$(OUT)/run_tests: tests/c/run_tests.c $(OUT)/libaa.a
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 

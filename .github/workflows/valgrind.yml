@@ -21,4 +21,4 @@ jobs:
       - name: Run gd example under valgrind
         env:
           RUNNER: "valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --error-exitcode=1 -q"
-        run: test/check_gd_convergence.sh
+        run: tests/c/check_gd_convergence.sh
