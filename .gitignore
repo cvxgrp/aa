@@ -1,6 +1,8 @@
 out
 *.o
+*.so
 *.swp
 python/aapy.c
 python/build
 python/.*
+.pytest_cache
