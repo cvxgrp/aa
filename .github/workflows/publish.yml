@@ -19,7 +19,7 @@ on:
       - 'python/aapy.pyx'
       - 'src/**'
       - 'include/**'
-      - 'tests/test_wheel.py'
+      - 'tests/python/test_wheel.py'
       - '.github/workflows/publish.yml'
   workflow_dispatch:
 

@@ -1,9 +1,9 @@
 """Tests for the aa Python bindings.
 
-Run from the ``python/`` directory after building the extension in place
-(``python setup.py build_ext --inplace``):
+Install the extension in editable mode from the repo root
+(``pip install -e .``) then run:
 
-    pytest test_aa.py
+    pytest tests/python/test_aa.py
 """
 
 import numpy as np

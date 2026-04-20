@@ -76,8 +76,7 @@ def main():
     ax.legend()
     fig.tight_layout()
 
-    out = os.path.join(os.path.dirname(__file__), "..", "convergence.png")
-    out = os.path.normpath(out)
+    out = os.path.join(os.path.dirname(__file__), "convergence.png")
     fig.savefig(out, dpi=120)
     print(f"wrote {out}")
 

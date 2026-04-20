@@ -56,7 +56,7 @@ build-verbosity = 1
 # NOT contain the project source — guarantees we are exercising the installed
 # wheel, not a shadowed import from cwd.
 test-requires = ["numpy"]
-test-command = "python {project}/tests/test_wheel.py"
+test-command = "python {project}/tests/python/test_wheel.py"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

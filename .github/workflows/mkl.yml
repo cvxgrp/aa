@@ -75,4 +75,4 @@ jobs:
         run: |
           # Make sure MKL DLLs resolve at import time.
           export PATH="$CONDA/Library/bin:$PATH"
-          python tests/test_wheel.py
+          python tests/python/test_wheel.py

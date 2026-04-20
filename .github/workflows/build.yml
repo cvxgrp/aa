@@ -40,9 +40,7 @@ jobs:
           allow-prereleases: true
       - run: sudo apt-get update && sudo apt-get install -y libopenblas-dev liblapack-dev
       - run: python -m pip install --upgrade pip setuptools wheel cython numpy pytest
-      - name: Build Cython extension
-        working-directory: python
-        run: python setup.py build_ext --inplace
+      - name: Install the Cython extension (editable)
+        run: python -m pip install -e .
       - name: Run pytest suite
-        working-directory: python
-        run: pytest -v test_aa.py
+        run: pytest -v tests/python/test_aa.py
