@@ -33,6 +33,24 @@
 
 int tests_run = 0;
 
+#ifdef _WIN32
+#include <windows.h>
+typedef struct _timer {
+  LARGE_INTEGER tic;
+  LARGE_INTEGER toc;
+} _timer;
+
+void _tic(_timer *t) {
+  QueryPerformanceCounter(&t->tic);
+}
+
+aa_float _tocq(_timer *t) {
+  LARGE_INTEGER freq;
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&t->toc);
+  return (aa_float)(t->toc.QuadPart - t->tic.QuadPart) / (aa_float)freq.QuadPart * 1e3;
+}
+#else
 typedef struct _timer {
   struct timespec tic;
   struct timespec toc;
@@ -56,6 +74,7 @@ aa_float _tocq(_timer *t) {
   }
   return (aa_float)temp.tv_sec * 1e3 + (aa_float)temp.tv_nsec / 1e6;
 }
+#endif
 
 /* uniform random number in [-1,1] */
 static aa_float rand_float(void) {

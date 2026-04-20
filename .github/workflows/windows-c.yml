@@ -1,0 +1,48 @@
+name: Windows C
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up OpenBLAS (Windows)
+        shell: pwsh
+        run: |
+          $version = "0.3.27"
+          $url = "https://github.com/OpenMathLib/OpenBLAS/releases/download/v$version/OpenBLAS-$version-x64.zip"
+          $staging = "$env:GITHUB_WORKSPACE\openblas-staging"
+          Invoke-WebRequest -Uri $url -OutFile openblas.zip
+          Expand-Archive -Path openblas.zip -DestinationPath $staging
+          $libFile = Get-ChildItem $staging -Recurse -Filter libopenblas.lib | Select-Object -First 1
+          if (-not $libFile) { throw "libopenblas.lib not found under $staging" }
+          $root = ($libFile.Directory.Parent.FullName) -replace '\\','/'
+          "OPENBLAS_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Add bin directory to PATH so DLL is found at runtime
+          "$root/bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build C Library
+        shell: cmd
+        run: |
+          mkdir out
+          cl /O2 /Iinclude /DPROFILING=1 tests\c\run_tests.c src\aa.c /I%OPENBLAS_ROOT%\include /link /LIBPATH:%OPENBLAS_ROOT%\lib libopenblas.lib /out:out\run_tests.exe
+          cl /O2 /Iinclude /DPROFILING=1 tests\c\gd.c src\aa.c /I%OPENBLAS_ROOT%\include /link /LIBPATH:%OPENBLAS_ROOT%\lib libopenblas.lib /out:out\gd.exe
+
+      - name: Run C Tests
+        shell: cmd
+        run: |
+          out\run_tests.exe
+
+      - name: Run GD convergence tests
+        shell: bash
+        run: |
+          export GD=out/gd.exe
+          bash tests/c/check_gd_convergence.sh
