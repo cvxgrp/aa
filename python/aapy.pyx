@@ -6,7 +6,7 @@ cdef extern from "../src/aa.c":
 cdef extern from "../include/aa.h":
     ctypedef struct AaWork:
         pass
-    AaWork *aa_init(int, int, int, float, float, float, float, int)
+    AaWork *aa_init(int, int, int, double, double, double, double, int)
     double aa_apply(double*, const double*, AaWork*)
     int aa_safeguard(double*, double*, AaWork*)
     void aa_reset(AaWork*)
@@ -21,21 +21,24 @@ cdef class AndersonAccelerator(object):
                   verbosity=0):
         self._wrk = aa_init(dim, mem, type1, regularization, relaxation,
                             safeguard_factor, max_weight_norm, verbosity)
+        if self._wrk is NULL:
+            raise MemoryError("aa_init failed")
         self._dim = dim
 
     def _validate(self, f, x):
         f = np.squeeze(f)
         x = np.squeeze(x)
-        if (f.shape != (self._dim,) or x.shape != (self._dim,)):
-          raise ValueError("Incorrect input dimension")
-
-        if not f.flags['C_CONTIGUOUS']:
-            # Makes a contiguous copy of the numpy array.
-            f = np.ascontiguousarray(f)
+        if f.shape != (self._dim,) or x.shape != (self._dim,):
+            raise ValueError("Incorrect input dimension")
+        # aa_apply / aa_safeguard write through these pointers, so we must
+        # not silently hand the C code a copy. Reject non-contiguous input
+        # rather than copying and dropping the writes on the floor.
+        if not f.flags['C_CONTIGUOUS'] or not f.flags['WRITEABLE']:
+            raise ValueError("first array must be C-contiguous and writeable")
         if not x.flags['C_CONTIGUOUS']:
-            # Makes a contiguous copy of the numpy array.
-            x = np.ascontiguousarray(x)
-
+            raise ValueError("second array must be C-contiguous")
+        if f.dtype != np.float64 or x.dtype != np.float64:
+            raise TypeError("arrays must be float64")
         return f, x
 
     def apply(self, f, x):
