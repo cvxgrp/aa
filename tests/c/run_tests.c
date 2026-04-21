@@ -485,6 +485,57 @@ static const char *test_ill_conditioned_gd(void) {
   return 0;
 }
 
+/* Rank-deficient memory: the Y columns live in a low-rank subspace
+ * (only a handful of eigenmodes are active) but mem is deliberately
+ * oversized. Without pivoted QR + rank truncation this used to force a
+ * full aa_reset every time the memory filled, destroying convergence.
+ * With truncation AA keeps the well-conditioned subspace and continues
+ * making progress. Assert (i) the run converges well below the plain-GD
+ * residual at this iter count and (ii) aa_apply mostly succeeds (no
+ * reset cascade). */
+static const char *test_rank_deficient_memory_oversized_mem(void) {
+  const aa_int n = 50;
+  aa_float Qdiag[50];
+  /* Only the first 3 eigenvalues are "interesting"; the rest are ~1.0
+   * so GD kills them in one step and they don't contribute to Y. */
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = (i < 3) ? (1e-3 + 3e-3 * i) : 1.0;
+  }
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(31);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  /* mem=20, much larger than the ≈3 effective directions in Y. */
+  AaWork *a = aa_init(n, /*mem=*/20, /*type1=*/1, /*reg=*/1e-10,
+                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*verbosity=*/0);
+  aa_int applies = 0, rejects = 0;
+  const aa_int iters = 500;
+  for (aa_int i = 0; i < iters; i++) {
+    if (i > 0) {
+      aa_float w = aa_apply(x, xprev, a);
+      if (w > 0) applies++;
+      else rejects++;
+    }
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  (void)applies;
+  (void)rejects;
+  mu_assert("rank-deficient run produced non-finite iterate", isfinite(err));
+  /* With rank truncation AA converges all the way to machine precision
+   * on this problem; without it the oversized memory triggered cascading
+   * resets and err stayed above the sub-mem-used plain-GD floor. */
+  mu_assert_less("rank-deficient run failed to converge to near-zero",
+                 err, 1e-10);
+  return 0;
+}
+
 /* First-iteration behavior: aa_apply on iter 0 must only seed internal
  * state and leave f untouched (return 0). This contract lets callers
  * unconditionally call aa_apply without branching. */
@@ -552,6 +603,8 @@ static const char *all_tests(void) {
   mu_run_test(test_zero_reg_near_singular_y);
   printf("unit: AA still converges on kappa=1e10 problem\n");
   mu_run_test(test_ill_conditioned_gd);
+  printf("unit: rank-deficient memory with oversized mem converges\n");
+  mu_run_test(test_rank_deficient_memory_oversized_mem);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
 

@@ -30,10 +30,17 @@
  * matrix becomes numerically singular.
  */
 
+#include <float.h>
 #include <math.h>
 
 #include "aa.h"
 #include "aa_blas.h"
+
+#ifndef SFLOAT
+#define AA_EPS DBL_EPSILON
+#else
+#define AA_EPS FLT_EPSILON
+#endif
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -140,11 +147,19 @@ struct ACCEL_WORK {
   aa_float *B_aug;   /* (dim + mem) x mem  -- [Y; √r I] (type-I only) */
   aa_float *c_aug;   /* (dim + mem)        -- [g; 0], overwritten by Q' c */
   aa_float *tau;     /* mem                -- Householder scalars */
-  aa_float *qr_work; /* lwork              -- LAPACK scratch for geqrf/ormqr */
+  aa_float *qr_work; /* lwork              -- LAPACK scratch for geqp3/ormqr */
   blas_int qr_lwork; /* size of qr_work, chosen via workspace query at init */
+  blas_int *jpvt;    /* mem                -- column permutation from geqp3 */
 
-  aa_float *W;    /* mem x mem scratch: Q' B_aug top block (type-I gesv) */
-  blas_int *ipiv; /* gesv permutation (type-I) */
+  aa_float *W;      /* mem x mem scratch: Q' B_aug top block (type-I gesv) */
+  aa_float *W_orig; /* mem x mem: W copy preserved for iterative refinement */
+  blas_int *ipiv;   /* gesv permutation (type-I) */
+
+  /* Iterative refinement scratches (size mem each). Separate from `work`
+   * so the IR dance doesn't clobber γ or the safeguard scratch. */
+  aa_float *gamma_red;   /* permuted/truncated γ (length `rank`) */
+  aa_float *c_top_save;  /* original RHS preserved across the solve */
+  aa_float *ir_res;      /* residual/correction vector */
 
   /* dim-sized scratch used by aa_safeguard for the x_new - f_new diff. */
   aa_float *work;
@@ -283,13 +298,15 @@ static void relax(aa_float *f, AaWork *a, aa_int len) {
   TIME_TOC
 }
 
-/* Solve the regularized normal equations (A'B + rI) γ = A'g via a QR
- * factorization of the augmented matrix [A; √r I]. This avoids squaring
- * the condition number the way the normal-equations path did — the
- * returned γ is accurate down to machine precision × κ(A_aug), whereas
- * gesv on A'B lost precision at κ(A_aug)². On exit, f holds the AA
- * iterate and the function returns ||γ|| (or a negative sentinel on
- * failure). */
+/* Solve the regularized normal equations (A'B + rI) γ = A'g via a
+ * pivoted QR (geqp3) of the augmented matrix [A; √r I]. Column pivoting
+ * exposes the numerical rank directly in the diagonal of R: we truncate
+ * at the first diagonal whose magnitude falls below aug_rows·ε·|R_11|
+ * and solve the smaller, well-conditioned system (graceful degradation
+ * instead of hard reset on near-rank-deficiency). One step of iterative
+ * refinement on the reduced system recovers the last few digits lost to
+ * gesv/trsv rounding. A per-component L∞ check on γ rejects pathological
+ * cancellation-heavy solutions the L2 weight-norm check can miss. */
 static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
@@ -297,77 +314,153 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
    * allocated in aa_init match the strides used here. Unused trailing
    * rows are kept zero by build_augmented. */
   blas_int aug_rows = bdim + (blas_int)a->mem;
-  aa_float onef = 1.0, neg_onef = -1.0, aa_norm;
+  blas_int bmem = (blas_int)a->mem;
+  aa_float onef = 1.0, neg_onef = -1.0, aa_norm, aa_max = 0.0;
   aa_float *A_src = a->type1 ? a->S : a->Y;
-  aa_float *gamma = a->work; /* len-sized; `work` is MAX(mem,dim), safe here */
+  aa_float *gamma = a->work; /* natural-order γ, len entries used by gemv below */
+  aa_int i;
+  aa_int rank = 0;
+  blas_int brank;
 
   aa_float r = (a->regularization > 0) ? compute_regularization(a, len) : 0.0;
   aa_float sqrt_r = (r > 0) ? sqrt(r) : 0.0;
 
-  /* 1. Build A_aug = [A; √r I_len, zero-padded]; factor in place. */
+  /* 1. Build A_aug = [A; √r I_len]; factor with column pivoting. geqp3
+   *    requires jpvt zeroed on entry so it is free to choose the pivot
+   *    order (nonzero entries would be treated as user-forced pivots). */
   build_augmented(a->A_aug, A_src, a->dim, a->mem, len, sqrt_r);
-  BLAS(geqrf)(&aug_rows, &blen, a->A_aug, &aug_rows, a->tau,
+  for (i = 0; i < len; ++i) a->jpvt[i] = 0;
+  BLAS(geqp3)(&aug_rows, &blen, a->A_aug, &aug_rows, a->jpvt, a->tau,
               a->qr_work, &a->qr_lwork, &info);
 
-  /* 2. c_aug = [g; 0]; overwrite with Q' c_aug — first `len` entries are
-   *    (Q' [g;0])_{1..len}, which is what the solve consumes. */
+  /* 2. Rank estimation. geqp3 sorts |R_ii| non-increasingly; find the
+   *    largest `rank` with |R_rank-1,rank-1| ≥ tol. A rank of zero means
+   *    the whole Ã is numerically zero — hand off to aa_reset below. */
+  if (info == 0) {
+    aa_float r11 = fabs(a->A_aug[0]);
+    if (r11 > 0) {
+      aa_float tol = r11 * (aa_float)aug_rows * AA_EPS;
+      for (rank = 0; rank < len; ++rank) {
+        if (fabs(a->A_aug[rank * aug_rows + rank]) < tol) break;
+      }
+    }
+    if (rank == 0) info = 1;
+  }
+  brank = (blas_int)rank;
+
+  /* 3. c_aug = [g; 0]; overwrite with Q' c_aug. We only need the first
+   *    `rank` entries (= Q_rank' c̃); pass `rank` to ormqr so it applies
+   *    only the reflectors we care about. */
   if (info == 0) {
     memcpy(a->c_aug, a->g, a->dim * sizeof(aa_float));
     memset(&a->c_aug[a->dim], 0, a->mem * sizeof(aa_float));
     BLAS(ormqr)
-    ("Left", "Trans", &aug_rows, &one, &blen, a->A_aug, &aug_rows, a->tau,
+    ("Left", "Trans", &aug_rows, &one, &brank, a->A_aug, &aug_rows, a->tau,
      a->c_aug, &aug_rows, a->qr_work, &a->qr_lwork, &info);
   }
 
-  /* 3. Finish the solve differently by type. */
+  /* 4. Solve the reduced rank×rank system for γ_red (pivoted order),
+   *    then un-permute into the natural-order γ consumed by `f -= D γ`. */
   if (info == 0) {
+    /* Preserve the RHS for iterative refinement below. */
+    memcpy(a->c_top_save, a->c_aug, rank * sizeof(aa_float));
+
     if (a->type1) {
-      /* Type-I: W γ = Q' [g;0], where W = Q' [Y; √r I]. Build B_aug, apply
-       * Q', copy the mem×mem top block into W, solve with gesv. */
-      aa_int i;
-      build_augmented(a->B_aug, a->Y, a->dim, a->mem, len, sqrt_r);
+      /* Type-I: build B_aug with the pivoted Y columns (first `rank` only),
+       * apply Q', extract top-left rank×rank block into W, solve
+       * W γ_red = c_top. The √rI block is reshuffled too — column i of
+       * the permuted B̃ has √r at row (jpvt[i]-1). */
+      for (i = 0; i < rank; ++i) {
+        aa_int piv = a->jpvt[i] - 1; /* LAPACK jpvt is 1-indexed */
+        aa_float *col = &a->B_aug[i * aug_rows];
+        memcpy(col, &a->Y[piv * a->dim], a->dim * sizeof(aa_float));
+        memset(&col[a->dim], 0, a->mem * sizeof(aa_float));
+        col[a->dim + piv] = sqrt_r;
+      }
       BLAS(ormqr)
-      ("Left", "Trans", &aug_rows, &blen, &blen, a->A_aug, &aug_rows, a->tau,
-       a->B_aug, &aug_rows, a->qr_work, &a->qr_lwork, &info);
+      ("Left", "Trans", &aug_rows, &brank, &brank, a->A_aug, &aug_rows,
+       a->tau, a->B_aug, &aug_rows, a->qr_work, &a->qr_lwork, &info);
       if (info == 0) {
-        for (i = 0; i < len; ++i) {
-          memcpy(&a->W[i * len], &a->B_aug[i * aug_rows],
-                 len * sizeof(aa_float));
+        /* W (mem×mem, LDA=mem) holds the rank×rank top-left block. */
+        for (i = 0; i < rank; ++i) {
+          memcpy(&a->W[i * a->mem], &a->B_aug[i * aug_rows],
+                 rank * sizeof(aa_float));
+          memcpy(&a->W_orig[i * a->mem], &a->W[i * a->mem],
+                 rank * sizeof(aa_float));
         }
-        memcpy(gamma, a->c_aug, len * sizeof(aa_float));
-        BLAS(gesv)(&blen, &one, a->W, &blen, a->ipiv, gamma, &blen, &info);
+        memcpy(a->gamma_red, a->c_top_save, rank * sizeof(aa_float));
+        BLAS(gesv)
+        (&brank, &one, a->W, &bmem, a->ipiv, a->gamma_red, &brank, &info);
+        if (info == 0) {
+          /* One step of iterative refinement: ρ = c_top - W_orig γ_red;
+           * solve W δ = ρ with the LU already in W; γ_red += δ. */
+          memcpy(a->ir_res, a->c_top_save, rank * sizeof(aa_float));
+          BLAS(gemv)
+          ("NoTrans", &brank, &brank, &neg_onef, a->W_orig, &bmem,
+           a->gamma_red, &one, &onef, a->ir_res, &one);
+          BLAS(getrs)
+          ("NoTrans", &brank, &one, a->W, &bmem, a->ipiv, a->ir_res,
+           &brank, &info);
+          if (info == 0) {
+            BLAS(axpy)(&brank, &onef, a->ir_res, &one, a->gamma_red, &one);
+          }
+        }
       }
     } else {
-      /* Type-II: B = A, so Q' [B; √rI] = R — already stored in the upper
-       * triangle of A_aug. Back-solve R γ = (Q'c)_{1..len}. Guard against
-       * a zero on the diagonal, which geqrf will leave if A_aug has a rank
-       * deficiency (it silently produces a triangular R with zero rows
-       * rather than setting info). */
-      aa_int i;
-      memcpy(gamma, a->c_aug, len * sizeof(aa_float));
-      for (i = 0; i < len; ++i) {
-        if (a->A_aug[i * aug_rows + i] == 0.0) {
-          info = i + 1;
-          break;
-        }
+      /* Type-II: B̃ = Ã, so Q' B̃ = R. Solve R u = c_top for the permuted
+       * solution u; the rank×rank leading block of R lives in the upper
+       * triangle of A_aug. Rank truncation above already guaranteed the
+       * diagonal is nonzero through index rank-1. */
+      memcpy(a->gamma_red, a->c_top_save, rank * sizeof(aa_float));
+      BLAS(trsv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
+                 &aug_rows, a->gamma_red, &one);
+      /* IR: ρ = c_top - R u. Form R u via trmv on a copy of u, subtract
+       * from c_top_save, then solve R δ = ρ via trsv. */
+      memcpy(a->ir_res, a->gamma_red, rank * sizeof(aa_float));
+      BLAS(trmv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
+                 &aug_rows, a->ir_res, &one);
+      for (i = 0; i < rank; ++i) {
+        a->ir_res[i] = a->c_top_save[i] - a->ir_res[i];
       }
-      if (info == 0) {
-        BLAS(trsv)("Upper", "NoTrans", "NonUnit", &blen, a->A_aug,
-                   &aug_rows, gamma, &one);
+      BLAS(trsv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
+                 &aug_rows, a->ir_res, &one);
+      BLAS(axpy)(&brank, &onef, a->ir_res, &one, a->gamma_red, &one);
+    }
+
+    /* Un-permute γ_red into γ (natural column order); zero the rest so
+     * the `f -= D γ` gemv below sees a well-defined full-length vector. */
+    if (info == 0) {
+      memset(gamma, 0, len * sizeof(aa_float));
+      for (i = 0; i < rank; ++i) {
+        gamma[a->jpvt[i] - 1] = a->gamma_red[i];
       }
     }
   }
 
+  /* 5. Validate γ: L2 norm (existing) and L∞ norm (new). The L∞ check
+   *    catches sign-flipping γ's where a couple of large components
+   *    cancel in ‖γ‖₂ but amplify roundoff in D γ. */
   aa_norm = (info == 0) ? BLAS(nrm2)(&blen, gamma, &one) : -1.0;
-  if (a->verbosity > 1) {
-    printf("AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-           a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
+  if (info == 0) {
+    for (i = 0; i < len; ++i) {
+      aa_float g_i = fabs(gamma[i]);
+      if (g_i > aa_max) aa_max = g_i;
+    }
   }
 
-  if (info != 0 || !isfinite(aa_norm) || aa_norm >= a->max_weight_norm) {
+  if (a->verbosity > 1) {
+    printf("AA type %i, iter: %i, len %i, rank %i, info: %i, aa_norm %.2e, max_g %.2e\n",
+           a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)rank, (int)info,
+           aa_norm, aa_max);
+  }
+
+  if (info != 0 || !isfinite(aa_norm) || aa_norm >= a->max_weight_norm ||
+      aa_max >= a->max_weight_norm) {
     if (a->verbosity > 0) {
-      printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
-             a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
+      printf("Error in AA type %i, iter: %i, len %i, rank %i, info: %i, "
+             "aa_norm %.2e, max_g %.2e\n",
+             a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)rank, (int)info,
+             aa_norm, aa_max);
     }
     a->success = 0;
     aa_reset(a);
@@ -438,30 +531,43 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
     a->A_aug = (aa_float *)calloc((size_t)aug_rows * a->mem, sizeof(aa_float));
     a->c_aug = (aa_float *)calloc((size_t)aug_rows, sizeof(aa_float));
     a->tau = (aa_float *)calloc(a->mem, sizeof(aa_float));
-    /* type-I needs a second augmented buffer and a mem×mem gesv scratch */
+    a->jpvt = (blas_int *)calloc(a->mem, sizeof(blas_int));
+
+    /* Scratches for iterative refinement (both types). */
+    a->gamma_red = (aa_float *)calloc(a->mem, sizeof(aa_float));
+    a->c_top_save = (aa_float *)calloc(a->mem, sizeof(aa_float));
+    a->ir_res = (aa_float *)calloc(a->mem, sizeof(aa_float));
+
+    /* type-I needs a second augmented buffer and mem×mem gesv scratches;
+     * W_orig preserves W across gesv so iterative refinement can form
+     * the residual c_top − W γ. */
     if (type1) {
       a->B_aug = (aa_float *)calloc((size_t)aug_rows * a->mem, sizeof(aa_float));
       a->W = (aa_float *)calloc((size_t)a->mem * a->mem, sizeof(aa_float));
+      a->W_orig = (aa_float *)calloc((size_t)a->mem * a->mem, sizeof(aa_float));
       a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
     } else {
       a->B_aug = NULL;
       a->W = NULL;
+      a->W_orig = NULL;
       a->ipiv = NULL;
     }
 
-    /* LAPACK workspace query: ask geqrf and ormqr for their preferred lwork,
+    /* LAPACK workspace query: ask geqp3 and ormqr for their preferred lwork,
      * then take the max. lwork = -1 makes the routine write the optimal
-     * size into work[0] without doing any factoring. The optimal size is
-     * returned in an aa_float slot; round up with ceil before casting so a
-     * value like 255.9999 doesn't truncate to 255 and under-allocate. */
+     * size into work[0] without doing any factoring. geqp3 typically wants
+     * more scratch than geqrf because it also maintains column norms. The
+     * optimal size is returned in an aa_float slot; round up with ceil
+     * before casting so a value like 255.9999 doesn't truncate to 255 and
+     * under-allocate. */
     {
       blas_int b_aug = (blas_int)aug_rows;
       blas_int b_mem = (blas_int)a->mem;
       blas_int b_neg_one = -1;
       blas_int info_q = 0;
-      aa_float q_geqrf = 0.0, q_ormqr_c = 0.0, q_ormqr_b = 0.0;
-      BLAS(geqrf)(&b_aug, &b_mem, a->A_aug, &b_aug, a->tau,
-                  &q_geqrf, &b_neg_one, &info_q);
+      aa_float q_geqp3 = 0.0, q_ormqr_c = 0.0, q_ormqr_b = 0.0;
+      BLAS(geqp3)(&b_aug, &b_mem, a->A_aug, &b_aug, a->jpvt, a->tau,
+                  &q_geqp3, &b_neg_one, &info_q);
       {
         blas_int b_one = 1;
         BLAS(ormqr)
@@ -474,7 +580,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
          a->B_aug, &b_aug, &q_ormqr_b, &b_neg_one, &info_q);
       }
       {
-        aa_float lwork_f = q_geqrf;
+        aa_float lwork_f = q_geqp3;
         if (q_ormqr_c > lwork_f) lwork_f = q_ormqr_c;
         if (q_ormqr_b > lwork_f) lwork_f = q_ormqr_b;
         /* Floor at mem — some LAPACK builds return modest sizes; keep
@@ -500,8 +606,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
    * is safe against NULL members. */
   if (!a->x || !a->f || !a->g || !a->g_prev ||
       !a->Y || !a->S || !a->D ||
-      !a->A_aug || !a->c_aug || !a->tau || !a->qr_work ||
-      (type1 && (!a->B_aug || !a->W || !a->ipiv)) ||
+      !a->A_aug || !a->c_aug || !a->tau || !a->qr_work || !a->jpvt ||
+      !a->gamma_red || !a->c_top_save || !a->ir_res ||
+      (type1 && (!a->B_aug || !a->W || !a->W_orig || !a->ipiv)) ||
       !a->work ||
       (relaxation != 1.0 && !a->x_work)) {
     printf("Failed to allocate memory for AA.\n");
@@ -601,8 +708,13 @@ void aa_finish(AaWork *a) {
     free(a->c_aug);
     free(a->tau);
     free(a->qr_work);
+    free(a->jpvt);
     free(a->W);
+    free(a->W_orig);
     free(a->ipiv);
+    free(a->gamma_red);
+    free(a->c_top_save);
+    free(a->ir_res);
     free(a->work);
     if (a->x_work) {
       free(a->x_work);
@@ -660,8 +772,23 @@ void aa_reset(AaWork *a) {
   if (a->qr_work) {
     memset(a->qr_work, 0, sizeof(aa_float) * (size_t)a->qr_lwork);
   }
+  if (a->jpvt) {
+    memset(a->jpvt, 0, sizeof(blas_int) * a->mem);
+  }
   if (a->W) {
     memset(a->W, 0, sizeof(aa_float) * a->mem * a->mem);
+  }
+  if (a->W_orig) {
+    memset(a->W_orig, 0, sizeof(aa_float) * a->mem * a->mem);
+  }
+  if (a->gamma_red) {
+    memset(a->gamma_red, 0, sizeof(aa_float) * a->mem);
+  }
+  if (a->c_top_save) {
+    memset(a->c_top_save, 0, sizeof(aa_float) * a->mem);
+  }
+  if (a->ir_res) {
+    memset(a->ir_res, 0, sizeof(aa_float) * a->mem);
   }
   if (a->work) {
     memset(a->work, 0, sizeof(aa_float) * MAX(a->mem, a->dim));
