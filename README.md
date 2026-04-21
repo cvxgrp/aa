@@ -82,7 +82,9 @@ Q  = Qh.T @ Qh + 1e-3 * np.eye(dim)
 q  = rng.standard_normal(dim)
 eigs = np.linalg.eigvalsh(Q)
 step = 2.0 / (eigs.min() + eigs.max())  # optimal GD step for a quadratic
-x_star = np.linalg.solve(Q, q)          # true optimum, for error measurement
+x_star = np.linalg.solve(Q, q)             # true optimum, for error measurement
+f = lambda x: 0.5 * x @ Q @ x - q @ x      # objective
+f_star = f(x_star)
 
 acc = aa.AndersonAccelerator(dim, mem, type1=True, regularization=1e-8)
 
@@ -90,11 +92,11 @@ x = rng.standard_normal(dim)
 x_prev = x.copy()
 for i in range(N):
     if i > 0:
-        _ = acc.apply(x, x_prev)       # in-place: overwrites x with AA extrapolate
+        _ = acc.apply(x, x_prev)           # in-place: overwrites x with AA extrapolate
     x_prev = x.copy()
-    x = x - step * (Q @ x_prev - q)    # your map F — gradient step
-    _ = acc.safeguard(x, x_prev)       # rolls back if AA didn't help
-    print(f"iter {i:4d}  ||x - x*|| = {np.linalg.norm(x - x_star):.3e}")
+    x = x - step * (Q @ x_prev - q)        # your map F — gradient step
+    _ = acc.safeguard(x, x_prev)           # rolls back if AA didn't help
+    print(f"iter {i:4d}  f(x) - f* = {f(x) - f_star:.3e}")
 ```
 
 Convergence on this problem for vanilla GD vs AA-accelerated GD (Type-I and
