@@ -573,6 +573,29 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
       a->ipiv = NULL;
     }
 
+    a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
+    if (relaxation != 1.0) {
+      a->x_work = (aa_float *)calloc(a->dim, sizeof(aa_float));
+    } else {
+      a->x_work = NULL;
+    }
+
+    /* Check every allocation before the LAPACK workspace query below. The
+     * query passes A_aug/jpvt/tau/c_aug/B_aug into geqp3/ormqr; if any of
+     * them is NULL we'd dereference inside LAPACK instead of returning
+     * cleanly. qr_work is still NULL here — it's allocated after the query. */
+    if (!a->x || !a->f || !a->g || !a->g_prev ||
+        !a->Y || !a->S || !a->D ||
+        !a->A_aug || !a->c_aug || !a->tau || !a->jpvt ||
+        !a->gamma_red || !a->c_top_save || !a->ir_res ||
+        (type1 && (!a->B_aug || !a->W || !a->W_orig || !a->ipiv)) ||
+        !a->work ||
+        (relaxation != 1.0 && !a->x_work)) {
+      printf("Failed to allocate memory for AA.\n");
+      aa_finish(a);
+      return (AaWork *)0;
+    }
+
     /* LAPACK workspace query: ask geqp3 and ormqr for their preferred lwork,
      * then take the max. lwork = -1 makes the routine write the optimal
      * size into work[0] without doing any factoring. geqp3 typically wants
@@ -610,30 +633,11 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
         a->qr_work = (aa_float *)calloc((size_t)a->qr_lwork, sizeof(aa_float));
       }
     }
-  }
-
-  /* work is a dim-sized scratch for aa_safeguard's x_new - f_new, and also
-   * the len-sized home for γ inside solve(); size for the larger of the two. */
-  a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
-
-  if (relaxation != 1.0) {
-    a->x_work = (aa_float *)calloc(a->dim, sizeof(aa_float));
-  } else {
-    a->x_work = NULL;
-  }
-
-  /* If any allocation failed, free the partial workspace and bail. aa_finish
-   * is safe against NULL members. */
-  if (!a->x || !a->f || !a->g || !a->g_prev ||
-      !a->Y || !a->S || !a->D ||
-      !a->A_aug || !a->c_aug || !a->tau || !a->qr_work || !a->jpvt ||
-      !a->gamma_red || !a->c_top_save || !a->ir_res ||
-      (type1 && (!a->B_aug || !a->W || !a->W_orig || !a->ipiv)) ||
-      !a->work ||
-      (relaxation != 1.0 && !a->x_work)) {
-    printf("Failed to allocate memory for AA.\n");
-    aa_finish(a);
-    return (AaWork *)0;
+    if (!a->qr_work) {
+      printf("Failed to allocate memory for AA.\n");
+      aa_finish(a);
+      return (AaWork *)0;
+    }
   }
   TIME_TOC
   return a;

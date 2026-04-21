@@ -322,10 +322,19 @@ static const char *test_ir_max_steps_no_regression_on_ill_conditioned(void) {
   }
   mu_assert("ir=0 run produced non-finite iterate", isfinite(errs[0]));
   mu_assert("ir=5 run produced non-finite iterate", isfinite(errs[1]));
-  /* Both must reach the shared convergence bar (same as
-   * test_ill_conditioned_gd); below that they're noise. */
-  mu_assert_less("ir=0 did not converge on kappa=1e10", errs[0], 1e-2);
-  mu_assert_less("ir=5 did not converge on kappa=1e10", errs[1], 1e-2);
+  /* Both should drive past any pre-IR convergence wall on this κ=1e10
+   * problem. 1e-8 is well below where plain QR-without-IR would stall
+   * but well above the machine-precision noise floor so the check is
+   * meaningful. */
+  mu_assert_less("ir=0 did not converge on kappa=1e10", errs[0], 1e-8);
+  mu_assert_less("ir=5 did not converge on kappa=1e10", errs[1], 1e-8);
+  /* The actual "no regression" claim: ir=5 must not be materially worse
+   * than ir=0. At machine-precision both are noise; max() against 1e-12
+   * prevents a spurious fail when ir=0 happens to hit a lower noise draw. */
+  {
+    aa_float baseline = errs[0] > 1e-12 ? errs[0] : 1e-12;
+    mu_assert_less("ir=5 regressed relative to ir=0", errs[1], 3.0 * baseline);
+  }
   return 0;
 }
 
@@ -573,11 +582,11 @@ static const char *test_ill_conditioned_gd(void) {
 /* Rank-deficient memory: the Y columns live in a low-rank subspace
  * (only a handful of eigenmodes are active) but mem is deliberately
  * oversized. Without pivoted QR + rank truncation this used to force a
- * full aa_reset every time the memory filled, destroying convergence.
- * With truncation AA keeps the well-conditioned subspace and continues
- * making progress. Assert (i) the run converges well below the plain-GD
- * residual at this iter count and (ii) aa_apply mostly succeeds (no
- * reset cascade). */
+ * full aa_reset every time the memory filled, destroying convergence;
+ * the outcome was err stuck at roughly the plain-GD residual for the
+ * active modes. With truncation AA keeps the well-conditioned subspace
+ * and drives the iterate all the way to machine precision — that's the
+ * exact gap the convergence assertion below measures. */
 static const char *test_rank_deficient_memory_oversized_mem(void) {
   const aa_int n = 50;
   aa_float Qdiag[50];
@@ -586,36 +595,13 @@ static const char *test_rank_deficient_memory_oversized_mem(void) {
   for (int i = 0; i < n; i++) {
     Qdiag[i] = (i < 3) ? (1e-3 + 3e-3 * i) : 1.0;
   }
-  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
-  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
-  srand(31);
-  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   /* mem=20, much larger than the ≈3 effective directions in Y. */
-  AaWork *a = aa_init(n, /*mem=*/20, /*type1=*/1, /*reg=*/1e-10,
-                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
-                      /*ir_max_steps=*/5, /*verbosity=*/0);
-  aa_int applies = 0, rejects = 0;
-  const aa_int iters = 500;
-  for (aa_int i = 0; i < iters; i++) {
-    if (i > 0) {
-      aa_float w = aa_apply(x, xprev, a);
-      if (w > 0) applies++;
-      else rejects++;
-    }
-    memcpy(xprev, x, n * sizeof(aa_float));
-    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
-    aa_safeguard(x, xprev, a);
-  }
-  aa_float err = nrm2_vec(x, n);
-  aa_finish(a);
-  free(x);
-  free(xprev);
-  (void)applies;
-  (void)rejects;
+  aa_float err = diag_gd(Qdiag, n, /*step=*/1.0, /*mem=*/20, /*type1=*/1,
+                         /*relax=*/1.0, /*iters=*/500, /*seed=*/31);
   mu_assert("rank-deficient run produced non-finite iterate", isfinite(err));
-  /* With rank truncation AA converges all the way to machine precision
-   * on this problem; without it the oversized memory triggered cascading
-   * resets and err stayed above the sub-mem-used plain-GD floor. */
+  /* 1e-10 is well below where the pre-truncation behavior stalled
+   * (~1e-3 on this problem, set by the smallest interesting eigenvalue
+   * and plain-GD contraction over 500 iters). */
   mu_assert_less("rank-deficient run failed to converge to near-zero",
                  err, 1e-10);
   return 0;
