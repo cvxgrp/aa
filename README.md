@@ -113,10 +113,16 @@ examples requires installing `matplotlib` (`pip install matplotlib`).
 ```c
 #include "aa.h"
 
-AaWork *a = aa_init(/*dim=*/n, /*mem=*/10, /*type1=*/1,
-                    /*regularization=*/1e-8, /*relaxation=*/1.0,
-                    /*safeguard_factor=*/2.0, /*max_weight_norm=*/1e10,
-                    /*verbosity=*/0);
+AaWork *a = aa_init(
+    n,      /* dim              */
+    10,     /* mem              */
+    1,      /* type1            */
+    1e-8,   /* regularization   */
+    1.0,    /* relaxation       */
+    2.0,    /* safeguard_factor */
+    1e10,   /* max_weight_norm  */
+    0       /* verbosity        */
+);
 
 for (int i = 0; i < N; i++) {
     if (i > 0) aa_apply(x, x_prev, a);
