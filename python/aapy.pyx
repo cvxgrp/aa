@@ -16,7 +16,7 @@ cdef class AndersonAccelerator(object):
     cdef AaWork* _wrk
     cdef int _dim
 
-    def __cinit__(self, dim, mem, type1=False, regularization=1e-12,
+    def __cinit__(self, dim, mem, *, type1=False, regularization=1e-12,
                   relaxation=1.0, safeguard_factor=1.0, max_weight_norm=1e6,
                   ir_max_steps=5, verbosity=0):
         if dim <= 0:

@@ -165,6 +165,7 @@ convergence guarantees in that regime are stronger for Type-I (see the paper).
 aa.AndersonAccelerator(
     dim,
     mem,
+    *,
     type1=False,
     regularization=1e-12,
     relaxation=1.0,
@@ -175,8 +176,8 @@ aa.AndersonAccelerator(
 )
 ```
 
-All array arguments must be C-contiguous, writeable `float64` numpy arrays
-of length `dim`.
+All options after `mem` are keyword-only. Array arguments must be
+C-contiguous, writeable `float64` numpy arrays of length `dim`.
 
 | Method                  | Description                                                                                                                                       |
 |-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
