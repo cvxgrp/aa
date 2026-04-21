@@ -144,6 +144,18 @@ struct ACCEL_WORK {
   aa_float *S; /* matrix of stacked s values */
   aa_float *D; /* matrix of stacked d values = (S-Y) */
 
+  /* Per-column cached squared L2 norms of S and Y (length mem). Each slot
+   * is rewritten when its column is rewritten (update_accel_params), and
+   * compute_regularization sums them to form ||S||_F² / ||Y||_F² in O(mem)
+   * instead of the original O(dim·mem) nrm2 over the whole matrix. Storing
+   * per-column avoids the drift of an incremental "subtract old / add new"
+   * scheme: near convergence Y columns can shrink by many orders of
+   * magnitude and the add/subtract updates would fall below the running
+   * sum's rounding floor, pegging the total above the true Frobenius norm
+   * (observed on the κ=1e10 stress test). */
+  aa_float *nrm_s_col_sq;
+  aa_float *nrm_y_col_sq;
+
   /* QR workspaces, sized for the augmented problem. */
   aa_float *A_aug;   /* (dim + mem) x mem  -- [A; √r I]; factored in place */
   aa_float *B_aug;   /* (dim + mem) x mem  -- [Y; √r I] (type-I only) */
@@ -177,12 +189,18 @@ struct ACCEL_WORK {
  *     ||A'B||_F ≤ ||A||_F · ||B||_F
  * instead of maintaining a Gram matrix. For type-II A == B so this is
  * ||Y||_F², the same scale as the previous ||Y'Y||_F up to a factor
- * ≤ √mem. */
-static aa_float compute_regularization(AaWork *a, aa_int len) {
+ * ≤ √mem. Sums the per-column cached squared norms (O(mem)) rather than
+ * a fresh nrm2 over dim·mem entries. */
+static aa_float compute_regularization(AaWork *a) {
   TIME_TIC
-  blas_int bmat = (blas_int)(a->dim * len), one = 1;
-  aa_float nrm_a = BLAS(nrm2)(&bmat, a->type1 ? a->S : a->Y, &one);
-  aa_float nrm_y = a->type1 ? BLAS(nrm2)(&bmat, a->Y, &one) : nrm_a;
+  aa_int i;
+  aa_float sum_s = 0, sum_y = 0;
+  for (i = 0; i < a->mem; ++i) {
+    sum_s += a->nrm_s_col_sq[i];
+    sum_y += a->nrm_y_col_sq[i];
+  }
+  aa_float nrm_a = sqrt(a->type1 ? sum_s : sum_y);
+  aa_float nrm_y = sqrt(sum_y);
   aa_float r = a->regularization * nrm_a * nrm_y;
   if (a->verbosity > 2) {
     printf("iter: %i, ||A||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
@@ -267,6 +285,15 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   memcpy(y_col, a->g, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, y_col, &one);
 
+  /* Update the per-column cached squared norms for the slot we just
+   * rewrote. compute_regularization sums these on demand. */
+  {
+    aa_float new_s = BLAS(nrm2)(&bdim, s_col, &one);
+    aa_float new_y = BLAS(nrm2)(&bdim, y_col, &one);
+    a->nrm_s_col_sq[idx] = new_s * new_s;
+    a->nrm_y_col_sq[idx] = new_y * new_y;
+  }
+
   /* State advance for next iter: (x_prev, f_prev, g_prev) <- (x, f, g).
    * Must follow all the reads above. */
   memcpy(a->x, x, sizeof(aa_float) * a->dim);
@@ -327,7 +354,20 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   aa_int rank = 0;
   blas_int brank;
 
-  aa_float r = (a->regularization > 0) ? compute_regularization(a, len) : 0.0;
+  /* Three regularization modes:
+   *   regularization > 0  : problem-scaled   r = regularization * ||A||_F ||Y||_F
+   *   regularization < 0  : pinned absolute  r = -regularization     (Frobenius skipped)
+   *   regularization == 0 : unregularized    r = 0
+   * Pinned mode gives a knob for applications where the problem scale is
+   * known and the caller wants a stable, scale-free regularizer. */
+  aa_float r;
+  if (a->regularization > 0) {
+    r = compute_regularization(a);
+  } else if (a->regularization < 0) {
+    r = -a->regularization;
+  } else {
+    r = 0.0;
+  }
   aa_float sqrt_r = (r > 0) ? sqrt(r) : 0.0;
 
   /* 1. Build A_aug = [A; √r I_len]; factor with column pivoting. geqp3
@@ -509,7 +549,10 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
                 aa_int verbosity) {
   TIME_TIC
   AaWork *a;
-  if (dim <= 0 || mem < 0 || regularization < 0 ||
+  /* `regularization` is accepted with either sign: positive = scaled by
+   * ||A||_F ||Y||_F; negative = pinned absolute |regularization|; zero = off.
+   * Only NaN / non-finite values are rejected (via the !isfinite check). */
+  if (dim <= 0 || mem < 0 || !isfinite(regularization) ||
       relaxation < 0 || relaxation > 2 ||
       safeguard_factor < 0 || max_weight_norm <= 0 ||
       ir_max_steps < 0) {
@@ -558,6 +601,10 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
     a->c_top_save = (aa_float *)calloc(a->mem, sizeof(aa_float));
     a->ir_res = (aa_float *)calloc(a->mem, sizeof(aa_float));
 
+    /* Per-column squared norms used by compute_regularization. */
+    a->nrm_s_col_sq = (aa_float *)calloc(a->mem, sizeof(aa_float));
+    a->nrm_y_col_sq = (aa_float *)calloc(a->mem, sizeof(aa_float));
+
     /* type-I needs a second augmented buffer and mem×mem gesv scratches;
      * W_orig preserves W across gesv so iterative refinement can form
      * the residual c_top − W γ. */
@@ -588,6 +635,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
         !a->Y || !a->S || !a->D ||
         !a->A_aug || !a->c_aug || !a->tau || !a->jpvt ||
         !a->gamma_red || !a->c_top_save || !a->ir_res ||
+        !a->nrm_s_col_sq || !a->nrm_y_col_sq ||
         (type1 && (!a->B_aug || !a->W || !a->W_orig || !a->ipiv)) ||
         !a->work ||
         (relaxation != 1.0 && !a->x_work)) {
@@ -739,6 +787,8 @@ void aa_finish(AaWork *a) {
     free(a->gamma_red);
     free(a->c_top_save);
     free(a->ir_res);
+    free(a->nrm_s_col_sq);
+    free(a->nrm_y_col_sq);
     free(a->work);
     if (a->x_work) {
       free(a->x_work);
@@ -813,6 +863,12 @@ void aa_reset(AaWork *a) {
   }
   if (a->ir_res) {
     memset(a->ir_res, 0, sizeof(aa_float) * a->mem);
+  }
+  if (a->nrm_s_col_sq) {
+    memset(a->nrm_s_col_sq, 0, sizeof(aa_float) * a->mem);
+  }
+  if (a->nrm_y_col_sq) {
+    memset(a->nrm_y_col_sq, 0, sizeof(aa_float) * a->mem);
   }
   if (a->work) {
     memset(a->work, 0, sizeof(aa_float) * MAX(a->mem, a->dim));

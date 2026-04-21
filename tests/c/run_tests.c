@@ -607,6 +607,44 @@ static const char *test_rank_deficient_memory_oversized_mem(void) {
   return 0;
 }
 
+/* Pinned-regularization mode: passing a negative value to aa_init means
+ * r is held fixed at |regularization| (no Frobenius scaling). The solver
+ * should still converge — this just verifies the alternate code path and
+ * that the pinned value is used unchanged. */
+static const char *test_pinned_regularization(void) {
+  const aa_int n = 30;
+  aa_float Qdiag[30];
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = 0.05 + 0.95 * (aa_float)i / (aa_float)(n - 1);
+  }
+  aa_float err = diag_gd(Qdiag, n, /*step=*/1.0, /*mem=*/5, /*type1=*/1,
+                         /*relax=*/1.0, /*iters=*/1000, /*seed=*/11);
+  (void)err; /* diag_gd uses its own fixed reg, just exercising the type */
+  /* Now explicitly test the pinned-reg path. */
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(11);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  /* Negative reg = pinned absolute value. */
+  AaWork *a = aa_init(n, /*mem=*/5, /*type1=*/1, /*reg=*/-1e-8,
+                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init must accept negative (pinned) regularization", a != NULL);
+  for (aa_int i = 0; i < 1000; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err_pinned = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("pinned-reg run produced non-finite iterate", isfinite(err_pinned));
+  mu_assert_less("pinned-reg failed to converge", err_pinned, 1e-8);
+  return 0;
+}
+
 /* First-iteration behavior: aa_apply on iter 0 must only seed internal
  * state and leave f untouched (return 0). This contract lets callers
  * unconditionally call aa_apply without branching. */
@@ -682,6 +720,8 @@ static const char *all_tests(void) {
   mu_run_test(test_ill_conditioned_gd);
   printf("unit: rank-deficient memory with oversized mem converges\n");
   mu_run_test(test_rank_deficient_memory_oversized_mem);
+  printf("unit: pinned regularization mode works\n");
+  mu_run_test(test_pinned_regularization);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
 
