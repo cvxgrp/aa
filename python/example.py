@@ -44,7 +44,7 @@ for mem in mems:
   print('Type-I acceleration, mem:', mem)
   fs = []
   x = x_0.copy()
-  aa_wrk = aa.AndersonAccelerator(dim, mem, True, regularization=1e-8,
+  aa_wrk = aa.AndersonAccelerator(dim, mem, type1=True, regularization=1e-8,
                                   relaxation=RELAXATION, verbosity=1,
                                   max_weight_norm=1e6)
   for i in range(N):
@@ -61,7 +61,7 @@ for mem in mems:
   print('Type-II acceleration, mem:', mem)
   fs = []
   x = x_0.copy()
-  aa_wrk = aa.AndersonAccelerator(dim, mem, False, regularization=1e-12,
+  aa_wrk = aa.AndersonAccelerator(dim, mem, type1=False, regularization=1e-12,
                                   relaxation=RELAXATION, verbosity=1,
                                   max_weight_norm=1e6)
   for i in range(N):

@@ -15,25 +15,26 @@
  *
  * Sweeps:
  *   scan:dim        fixed mem, varies dim        (shows AA scaling in dim)
- *   scan:mem        fixed dim, varies mem        (shows set_m/gemv in mem)
+ *   scan:mem        fixed dim, varies mem        (shows QR scaling in mem)
  *   scan:type       type-I vs type-II, same cfg
  *   scan:cond       varies conditioning          (convergence pressure)
  *   relaxation      relaxation != 1.0 path
  *   near-optimum    long run on an easy problem — after ~20 iters the
  *                   iterates are at machine precision, so S,Y columns
- *                   are denormal noise and M = Y^T Y is catastrophically
- *                   ill-conditioned. Exercises aa_apply's gesv-failure
- *                   path and the aa_reset fallback. Regressions in the
- *                   numerics show up here as blown-up final_err, NaNs,
- *                   or a change in the aa_rej/sg_rej counts.
+ *                   are denormal noise and A_aug is severely
+ *                   rank-deficient. Exercises the pivoted-QR rank
+ *                   truncation path (most iters) and the aa_reset
+ *                   fallback (when truncation yields rank 0). Regressions
+ *                   in the numerics show up here as blown-up final_err,
+ *                   NaNs, or a change in the aa_rej/sg_rej counts.
  *   noisy-floor     deterministic but iteration-dependent perturbation
  *                   injected into F(x). Iterates never fully converge —
  *                   they bounce within a ball of radius ~ noise_scale.
  *                   This is the *realistic* near-optimum regime (the
  *                   ~1e-6 iterate-difference world that real solvers
  *                   live in: stochastic gradients, approximate prox
- *                   operators, fixed tolerance on inner solves). Gram
- *                   matrix M is ill-conditioned but not denormal; it's
+ *                   operators, fixed tolerance on inner solves). A_aug
+ *                   is ill-conditioned but not rank-collapsed; it's
  *                   the hardest case for AA numerics because the signal
  *                   is O(noise_scale) and the noise is O(eps·|x|).
  *
@@ -133,7 +134,8 @@ static void run_one(bench_cfg cfg) {
 
   AaWork *a = aa_init(n, cfg.mem, cfg.type1, cfg.regularization,
                       cfg.relaxation, /*safeguard_factor=*/2.0,
-                      /*max_weight_norm=*/1e10, /*verbosity=*/0);
+                      /*max_weight_norm=*/1e10, /*ir_max_steps=*/5,
+                      /*verbosity=*/0);
   if (!a) {
     printf("%-20s | aa_init failed\n", cfg.label);
     free(x); free(xprev); free(Qdiag);
@@ -211,7 +213,7 @@ int main(void) {
     aa_float *x = (aa_float *)malloc(sizeof(aa_float) * wd);
     aa_float *xprev = (aa_float *)malloc(sizeof(aa_float) * wd);
     for (aa_int i = 0; i < wd; i++) { x[i] = 1.0; xprev[i] = 0.0; }
-    AaWork *a = aa_init(wd, wm, 0, 1e-12, 1.0, 2.0, 1e10, 0);
+    AaWork *a = aa_init(wd, wm, 0, 1e-12, 1.0, 2.0, 1e10, 5, 0);
     for (aa_int i = 0; i < wi; i++) {
       if (i > 0) aa_apply(x, xprev, a);
       memcpy(xprev, x, sizeof(aa_float) * wd);
@@ -228,20 +230,33 @@ int main(void) {
   /* -------- Scan: dim --------
    * cond=1e6 + iters=300 keeps every size in the "still making progress"
    * regime so the timing comparison reflects productive AA work, not
-   * degenerate post-convergence spinning. */
-  print_header("scan:dim (fixed mem=10, type-II, cond=1e6)");
-  bench_cfg dim_sweep[] = {
+   * degenerate post-convergence spinning. Both types are swept because
+   * type-I is the dominant deployment for this library and carries
+   * extra per-iter cost in the QR path (second ormqr + gesv). */
+  print_header("scan:dim type-II (fixed mem=10, cond=1e6)");
+  bench_cfg dim_sweep_ii[] = {
       {"dim=10",      10,    10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=100",     100,   10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=1000",    1000,  10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=5000",    5000,  10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=20000",   20000, 10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(dim_sweep)/sizeof(*dim_sweep); i++) run_one(dim_sweep[i]);
+  for (size_t i = 0; i < sizeof(dim_sweep_ii)/sizeof(*dim_sweep_ii); i++) run_one(dim_sweep_ii[i]);
 
-  /* -------- Scan: mem (set_m is quadratic in mem) -------- */
-  print_header("scan:mem (fixed dim=500, type-II, cond=1e4)");
-  bench_cfg mem_sweep[] = {
+  print_header("scan:dim type-I  (fixed mem=10, cond=1e6)");
+  bench_cfg dim_sweep_i[] = {
+      {"dim=10",      10,    10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=100",     100,   10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=1000",    1000,  10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=5000",    5000,  10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=20000",   20000, 10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(dim_sweep_i)/sizeof(*dim_sweep_i); i++) run_one(dim_sweep_i[i]);
+
+  /* -------- Scan: mem (QR solve is O(dim * mem^2) so mem growth shows
+   * up clearly) -------- */
+  print_header("scan:mem type-II (fixed dim=500, cond=1e4)");
+  bench_cfg mem_sweep_ii[] = {
       {"mem=1",       500, 1,   0, 1.0, 1e4, 500, 1e-12, 0.0},
       {"mem=5",       500, 5,   0, 1.0, 1e4, 500, 1e-12, 0.0},
       {"mem=10",      500, 10,  0, 1.0, 1e4, 500, 1e-12, 0.0},
@@ -249,7 +264,18 @@ int main(void) {
       {"mem=50",      500, 50,  0, 1.0, 1e4, 500, 1e-12, 0.0},
       {"mem=100",     500, 100, 0, 1.0, 1e4, 500, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(mem_sweep)/sizeof(*mem_sweep); i++) run_one(mem_sweep[i]);
+  for (size_t i = 0; i < sizeof(mem_sweep_ii)/sizeof(*mem_sweep_ii); i++) run_one(mem_sweep_ii[i]);
+
+  print_header("scan:mem type-I  (fixed dim=500, cond=1e4)");
+  bench_cfg mem_sweep_i[] = {
+      {"mem=1",       500, 1,   1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=5",       500, 5,   1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=10",      500, 10,  1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=20",      500, 20,  1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=50",      500, 50,  1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=100",     500, 100, 1, 1.0, 1e4, 500, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(mem_sweep_i)/sizeof(*mem_sweep_i); i++) run_one(mem_sweep_i[i]);
 
   /* -------- Scan: type -------- */
   print_header("scan:type (fixed dim=500, mem=10, cond=1e4)");
@@ -262,31 +288,50 @@ int main(void) {
   for (size_t i = 0; i < sizeof(type_sweep)/sizeof(*type_sweep); i++) run_one(type_sweep[i]);
 
   /* -------- Scan: cond -------- */
-  print_header("scan:cond (fixed dim=500, mem=10, type-II)");
-  bench_cfg cond_sweep[] = {
+  print_header("scan:cond type-II (fixed dim=500, mem=10)");
+  bench_cfg cond_sweep_ii[] = {
       {"cond=10",    500, 10, 0, 1.0, 10,   500,  1e-12, 0.0},
       {"cond=100",   500, 10, 0, 1.0, 100,  500,  1e-12, 0.0},
       {"cond=1e4",   500, 10, 0, 1.0, 1e4,  500,  1e-12, 0.0},
       {"cond=1e6",   500, 10, 0, 1.0, 1e6,  2000, 1e-12, 0.0},
       {"cond=1e8",   500, 10, 0, 1.0, 1e8,  2000, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(cond_sweep)/sizeof(*cond_sweep); i++) run_one(cond_sweep[i]);
+  for (size_t i = 0; i < sizeof(cond_sweep_ii)/sizeof(*cond_sweep_ii); i++) run_one(cond_sweep_ii[i]);
+
+  print_header("scan:cond type-I  (fixed dim=500, mem=10)");
+  bench_cfg cond_sweep_i[] = {
+      {"cond=10",    500, 10, 1, 1.0, 10,   500,  1e-8, 0.0},
+      {"cond=100",   500, 10, 1, 1.0, 100,  500,  1e-8, 0.0},
+      {"cond=1e4",   500, 10, 1, 1.0, 1e4,  500,  1e-8, 0.0},
+      {"cond=1e6",   500, 10, 1, 1.0, 1e6,  2000, 1e-8, 0.0},
+      {"cond=1e8",   500, 10, 1, 1.0, 1e8,  2000, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(cond_sweep_i)/sizeof(*cond_sweep_i); i++) run_one(cond_sweep_i[i]);
 
   /* -------- Relaxation (exercises x_work path) -------- */
-  print_header("relaxation (fixed dim=500, mem=10, cond=1e4)");
-  bench_cfg relax_sweep[] = {
+  print_header("relaxation type-II (fixed dim=500, mem=10, cond=1e4)");
+  bench_cfg relax_sweep_ii[] = {
       {"relax=1.0 (none)",  500, 10, 0, 1.0,  1e4, 1000, 1e-12, 0.0},
       {"relax=0.95",        500, 10, 0, 0.95, 1e4, 1000, 1e-12, 0.0},
       {"relax=1.2 (over)",  500, 10, 0, 1.2,  1e4, 1000, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(relax_sweep)/sizeof(*relax_sweep); i++) run_one(relax_sweep[i]);
+  for (size_t i = 0; i < sizeof(relax_sweep_ii)/sizeof(*relax_sweep_ii); i++) run_one(relax_sweep_ii[i]);
+
+  print_header("relaxation type-I  (fixed dim=500, mem=10, cond=1e4)");
+  bench_cfg relax_sweep_i[] = {
+      {"relax=1.0 (none)",  500, 10, 1, 1.0,  1e4, 1000, 1e-8, 0.0},
+      {"relax=0.95",        500, 10, 1, 0.95, 1e4, 1000, 1e-8, 0.0},
+      {"relax=1.2 (over)",  500, 10, 1, 1.2,  1e4, 1000, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(relax_sweep_i)/sizeof(*relax_sweep_i); i++) run_one(relax_sweep_i[i]);
 
   /* -------- Near-optimum: machine-precision saturation ------------
    * Easy well-conditioned problems where AA converges to machine
    * precision within ~20 iters; the remaining iterations run on
    * iterates of magnitude O(eps). S, Y columns are denormal noise
-   * and M = Y^T Y has condition number ~ 1/eps^2. This is the
-   * degenerate extreme — gesv starts failing and aa_reset fires.
+   * and A_aug is severely rank-deficient. This is the degenerate
+   * extreme — most iters land in the rank-truncation path and the
+   * occasional rank-0 case triggers aa_reset.
    */
   print_header("near-optimum: long runs past machine-precision convergence");
   bench_cfg near_opt[] = {
@@ -296,7 +341,7 @@ int main(void) {
       {"mem=50 tail",       200, 50, 0, 1.0, 10, 2000, 1e-12, 0.0},
       {"type-I saturate",   200, 10, 1, 1.0, 10, 2000, 1e-8,  0.0},
       /* Zero regularization amplifies ill-conditioning — a canary for
-       * the gesv-failure + aa_reset fallback. */
+       * the rank-truncation + aa_reset fallback. */
       {"no-reg saturate",   200, 10, 0, 1.0, 10, 2000, 0.0,   0.0},
   };
   for (size_t i = 0; i < sizeof(near_opt)/sizeof(*near_opt); i++) run_one(near_opt[i]);
@@ -306,11 +351,11 @@ int main(void) {
    * ball of radius ~noise_scale. Consecutive iterate differences
    * are O(noise_scale), not O(eps). This mimics what real solvers
    * see: stochastic gradients, approximate prox maps, inner solves
-   * with fixed tolerance. The Gram matrix M is ill-conditioned
-   * (signal is O(noise_scale), noise is O(eps·|x|)) but not
-   * denormal — which is actually harder for AA than the degenerate
-   * extreme above, because the regularization has to be tuned for
-   * it but there's no reset-on-failure safety net.
+   * with fixed tolerance. A_aug is ill-conditioned (signal is
+   * O(noise_scale), noise is O(eps·|x|)) but not rank-collapsed —
+   * which is actually harder for AA than the degenerate extreme
+   * above, because the regularization has to be tuned for it but
+   * the rank-truncation safety net rarely fires.
    */
   print_header("noisy-floor: realistic near-optimum regime, iter diffs ~ noise_scale");
   bench_cfg noisy[] = {
@@ -324,8 +369,8 @@ int main(void) {
       {"noise=1e-6 type-I",  200, 10, 1, 1.0, 10, 2000, 1e-8,  1e-6},
       {"noise=1e-6 mem=20",  200, 20, 0, 1.0, 10, 2000, 1e-12, 1e-6},
       /* noise_scale = 1e-8: tight — iterate differences of O(1e-8)
-       * with double precision gives ~8 digits of signal in the
-       * Gram matrix. Stress test. */
+       * with double precision gives ~8 digits of signal into the QR.
+       * Stress test. */
       {"noise=1e-8 type-II", 200, 10, 0, 1.0, 10, 2000, 1e-12, 1e-8},
       {"noise=1e-8 type-I",  200, 10, 1, 1.0, 10, 2000, 1e-8,  1e-8},
       /* Wider problems in the noisy regime: gemv dimension matters. */

@@ -124,6 +124,7 @@ AaWork *a = aa_init(n,     /* dim              */
                     1.0,   /* relaxation       */
                     2.0,   /* safeguard_factor */
                     1e10,  /* max_weight_norm  */
+                    5,     /* ir_max_steps     */
                     0);    /* verbosity        */
 
 for (int i = 0; i < N; i++) {
@@ -150,6 +151,7 @@ See [`tests/c/gd.c`](tests/c/gd.c) for a complete runnable example
 | `relaxation`       | Mixing parameter in `[0, 2]`; `1.0` is vanilla AA                                                 | `1.0`                                   |
 | `safeguard_factor` | Multiplier on the residual-growth ratio beyond which the AA step is rejected. Larger = more aggressive. | `2.0`                                   |
 | `max_weight_norm`  | Upper bound on the norm of the AA combination weights; rejects numerically unstable steps         | `1e6` – `1e10`                          |
+| `ir_max_steps`     | Cap on iterative-refinement passes for the weight solve. The loop stops early when refinement stalls, so this is an upper bound; raise for ill-conditioned problems, lower for tighter cost bounds. | `5`                                     |
 | `verbosity`        | `0` silent, higher values print progress and diagnostics                                          | `0`                                     |
 
 **Type-I vs Type-II.** Type-I often makes faster progress on well-conditioned
@@ -163,17 +165,19 @@ convergence guarantees in that regime are stronger for Type-I (see the paper).
 aa.AndersonAccelerator(
     dim,
     mem,
+    *,
     type1=False,
     regularization=1e-12,
     relaxation=1.0,
     safeguard_factor=1.0,
     max_weight_norm=1e6,
+    ir_max_steps=5,
     verbosity=0,
 )
 ```
 
-All array arguments must be C-contiguous, writeable `float64` numpy arrays
-of length `dim`.
+All options after `mem` are keyword-only. Array arguments must be
+C-contiguous, writeable `float64` numpy arrays of length `dim`.
 
 | Method                  | Description                                                                                                                                       |
 |-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -190,7 +194,7 @@ Python API exactly:
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1,
                 aa_float regularization, aa_float relaxation,
                 aa_float safeguard_factor, aa_float max_weight_norm,
-                aa_int verbosity);
+                aa_int ir_max_steps, aa_int verbosity);
 
 aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a);
 aa_int   aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a);

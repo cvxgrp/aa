@@ -15,13 +15,14 @@ meaningful fraction of wall time.
 
 Sweeps:
     scan:dim        fixed mem, varies dim      (AA scaling in dim)
-    scan:mem        fixed dim, varies mem      (set_m/gemv scaling in mem)
+    scan:mem        fixed dim, varies mem      (QR scaling in mem)
     scan:type       type-I vs type-II
     scan:cond       varies conditioning        (convergence pressure)
     relaxation      exercises x_work path
     near-optimum    long run past machine-precision convergence — S,Y
-                    columns are denormal noise, M is catastrophically
-                    ill-conditioned. Exercises the aa_reset fallback.
+                    columns are denormal noise, A_aug is severely
+                    rank-deficient. Exercises rank truncation and the
+                    aa_reset fallback.
     noisy-floor     deterministic iter-dependent perturbation in F.
                     Iterates never converge — they bounce in a ball of
                     radius ~ noise_scale. This is the realistic
@@ -144,7 +145,9 @@ def main():
     _warmup()
 
     # scan:dim — cond=1e6 + iters=300 keeps every size making progress.
-    _print_header("scan:dim (fixed mem=10, type-II, cond=1e6)")
+    # Both types are swept: type-I is the dominant deployment for this
+    # library and carries extra per-iter cost in the QR path.
+    _print_header("scan:dim type-II (fixed mem=10, cond=1e6)")
     for cfg in [
         BenchCfg("dim=10",      10,    10, False, 1.0, 1e6, 300, 1e-12),
         BenchCfg("dim=100",     100,   10, False, 1.0, 1e6, 300, 1e-12),
@@ -154,7 +157,17 @@ def main():
     ]:
         _run_one(cfg)
 
-    _print_header("scan:mem (fixed dim=500, type-II, cond=1e4)")
+    _print_header("scan:dim type-I  (fixed mem=10, cond=1e6)")
+    for cfg in [
+        BenchCfg("dim=10",      10,    10, True,  1.0, 1e6, 300, 1e-8),
+        BenchCfg("dim=100",     100,   10, True,  1.0, 1e6, 300, 1e-8),
+        BenchCfg("dim=1000",    1000,  10, True,  1.0, 1e6, 300, 1e-8),
+        BenchCfg("dim=5000",    5000,  10, True,  1.0, 1e6, 300, 1e-8),
+        BenchCfg("dim=20000",   20000, 10, True,  1.0, 1e6, 300, 1e-8),
+    ]:
+        _run_one(cfg)
+
+    _print_header("scan:mem type-II (fixed dim=500, cond=1e4)")
     for cfg in [
         BenchCfg("mem=1",       500, 1,   False, 1.0, 1e4, 500, 1e-12),
         BenchCfg("mem=5",       500, 5,   False, 1.0, 1e4, 500, 1e-12),
@@ -162,6 +175,17 @@ def main():
         BenchCfg("mem=20",      500, 20,  False, 1.0, 1e4, 500, 1e-12),
         BenchCfg("mem=50",      500, 50,  False, 1.0, 1e4, 500, 1e-12),
         BenchCfg("mem=100",     500, 100, False, 1.0, 1e4, 500, 1e-12),
+    ]:
+        _run_one(cfg)
+
+    _print_header("scan:mem type-I  (fixed dim=500, cond=1e4)")
+    for cfg in [
+        BenchCfg("mem=1",       500, 1,   True,  1.0, 1e4, 500, 1e-8),
+        BenchCfg("mem=5",       500, 5,   True,  1.0, 1e4, 500, 1e-8),
+        BenchCfg("mem=10",      500, 10,  True,  1.0, 1e4, 500, 1e-8),
+        BenchCfg("mem=20",      500, 20,  True,  1.0, 1e4, 500, 1e-8),
+        BenchCfg("mem=50",      500, 50,  True,  1.0, 1e4, 500, 1e-8),
+        BenchCfg("mem=100",     500, 100, True,  1.0, 1e4, 500, 1e-8),
     ]:
         _run_one(cfg)
 
@@ -174,7 +198,7 @@ def main():
     ]:
         _run_one(cfg)
 
-    _print_header("scan:cond (fixed dim=500, mem=10, type-II)")
+    _print_header("scan:cond type-II (fixed dim=500, mem=10)")
     for cfg in [
         BenchCfg("cond=10",    500, 10, False, 1.0, 10,    500,  1e-12),
         BenchCfg("cond=100",   500, 10, False, 1.0, 100,   500,  1e-12),
@@ -184,11 +208,29 @@ def main():
     ]:
         _run_one(cfg)
 
-    _print_header("relaxation (fixed dim=500, mem=10, cond=1e4)")
+    _print_header("scan:cond type-I  (fixed dim=500, mem=10)")
+    for cfg in [
+        BenchCfg("cond=10",    500, 10, True,  1.0, 10,    500,  1e-8),
+        BenchCfg("cond=100",   500, 10, True,  1.0, 100,   500,  1e-8),
+        BenchCfg("cond=1e4",   500, 10, True,  1.0, 1e4,   500,  1e-8),
+        BenchCfg("cond=1e6",   500, 10, True,  1.0, 1e6,   2000, 1e-8),
+        BenchCfg("cond=1e8",   500, 10, True,  1.0, 1e8,   2000, 1e-8),
+    ]:
+        _run_one(cfg)
+
+    _print_header("relaxation type-II (fixed dim=500, mem=10, cond=1e4)")
     for cfg in [
         BenchCfg("relax=1.0 (none)",  500, 10, False, 1.0,  1e4, 1000, 1e-12),
         BenchCfg("relax=0.95",        500, 10, False, 0.95, 1e4, 1000, 1e-12),
         BenchCfg("relax=1.2 (over)",  500, 10, False, 1.2,  1e4, 1000, 1e-12),
+    ]:
+        _run_one(cfg)
+
+    _print_header("relaxation type-I  (fixed dim=500, mem=10, cond=1e4)")
+    for cfg in [
+        BenchCfg("relax=1.0 (none)",  500, 10, True,  1.0,  1e4, 1000, 1e-8),
+        BenchCfg("relax=0.95",        500, 10, True,  0.95, 1e4, 1000, 1e-8),
+        BenchCfg("relax=1.2 (over)",  500, 10, True,  1.2,  1e4, 1000, 1e-8),
     ]:
         _run_one(cfg)
 
@@ -211,7 +253,7 @@ def main():
         BenchCfg("noise=1e-4 type-II", 200, 10, False, 1.0, 10, 2000, 1e-12, 1e-4),
         BenchCfg("noise=1e-4 type-I",  200, 10, True,  1.0, 10, 2000, 1e-8,  1e-4),
         # noise_scale = 1e-6: the regime the user pointed out — iterate
-        # differences of O(1e-6) and Gram-matrix signal of the same order.
+        # differences of O(1e-6); only ~6 digits of signal reach the QR.
         BenchCfg("noise=1e-6 type-II", 200, 10, False, 1.0, 10, 2000, 1e-12, 1e-6),
         BenchCfg("noise=1e-6 type-I",  200, 10, True,  1.0, 10, 2000, 1e-8,  1e-6),
         BenchCfg("noise=1e-6 mem=20",  200, 20, False, 1.0, 10, 2000, 1e-12, 1e-6),
