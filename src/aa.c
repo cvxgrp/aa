@@ -118,12 +118,13 @@ aa_float toc(const char *str, timer *t) {
 
 /* contains the necessary parameters to perform aa at each step */
 struct ACCEL_WORK {
-  aa_int type1;     /* bool, if true type 1 aa otherwise type 2 */
-  aa_int mem;       /* aa memory */
-  aa_int dim;       /* variable dimension */
-  aa_int iter;      /* current iteration */
-  aa_int verbosity; /* verbosity level, 0 is no printing */
-  aa_int success;   /* was the last AA step successful or not */
+  aa_int type1;        /* bool, if true type 1 aa otherwise type 2 */
+  aa_int mem;          /* aa memory */
+  aa_int dim;          /* variable dimension */
+  aa_int iter;         /* current iteration */
+  aa_int verbosity;    /* verbosity level, 0 is no printing */
+  aa_int success;      /* was the last AA step successful or not */
+  aa_int ir_max_steps; /* max iterative refinement passes, 0 disables */
 
   aa_float relaxation;       /* relaxation x and f, beta in some papers */
   aa_float regularization;   /* regularization */
@@ -392,17 +393,27 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
         BLAS(gesv)
         (&brank, &one, a->W, &bmem, a->ipiv, a->gamma_red, &brank, &info);
         if (info == 0) {
-          /* One step of iterative refinement: ρ = c_top - W_orig γ_red;
-           * solve W δ = ρ with the LU already in W; γ_red += δ. */
-          memcpy(a->ir_res, a->c_top_save, rank * sizeof(aa_float));
-          BLAS(gemv)
-          ("NoTrans", &brank, &brank, &neg_onef, a->W_orig, &bmem,
-           a->gamma_red, &one, &onef, a->ir_res, &one);
-          BLAS(getrs)
-          ("NoTrans", &brank, &one, a->W, &bmem, a->ipiv, a->ir_res,
-           &brank, &info);
-          if (info == 0) {
+          /* Iterative refinement: repeat while δ is still contracting,
+           * capped at ir_max_steps. Each step: ρ = c_top - W_orig γ_red,
+           * solve W δ = ρ with the LU already in W, γ_red += δ. Stop when
+           * ‖δ_k‖ ≥ 0.5·‖δ_{k-1}‖ (we've hit the working-precision floor
+           * and further steps won't help). */
+          aa_float prev_dnorm = 0.0;
+          aa_int k;
+          for (k = 0; k < a->ir_max_steps; ++k) {
+            aa_float dnorm;
+            memcpy(a->ir_res, a->c_top_save, rank * sizeof(aa_float));
+            BLAS(gemv)
+            ("NoTrans", &brank, &brank, &neg_onef, a->W_orig, &bmem,
+             a->gamma_red, &one, &onef, a->ir_res, &one);
+            BLAS(getrs)
+            ("NoTrans", &brank, &one, a->W, &bmem, a->ipiv, a->ir_res,
+             &brank, &info);
+            if (info != 0) break;
+            dnorm = BLAS(nrm2)(&brank, a->ir_res, &one);
             BLAS(axpy)(&brank, &onef, a->ir_res, &one, a->gamma_red, &one);
+            if (k > 0 && dnorm >= 0.5 * prev_dnorm) break;
+            prev_dnorm = dnorm;
           }
         }
       }
@@ -414,17 +425,28 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
       memcpy(a->gamma_red, a->c_top_save, rank * sizeof(aa_float));
       BLAS(trsv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
                  &aug_rows, a->gamma_red, &one);
-      /* IR: ρ = c_top - R u. Form R u via trmv on a copy of u, subtract
-       * from c_top_save, then solve R δ = ρ via trsv. */
-      memcpy(a->ir_res, a->gamma_red, rank * sizeof(aa_float));
-      BLAS(trmv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
-                 &aug_rows, a->ir_res, &one);
-      for (i = 0; i < rank; ++i) {
-        a->ir_res[i] = a->c_top_save[i] - a->ir_res[i];
+      /* Iterative refinement, capped at ir_max_steps with early stop when
+       * δ stops contracting. ρ = c_top - R u via trmv + subtract; solve
+       * R δ = ρ via trsv; u += δ. */
+      {
+        aa_float prev_dnorm = 0.0;
+        aa_int k;
+        for (k = 0; k < a->ir_max_steps; ++k) {
+          aa_float dnorm;
+          memcpy(a->ir_res, a->gamma_red, rank * sizeof(aa_float));
+          BLAS(trmv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
+                     &aug_rows, a->ir_res, &one);
+          for (i = 0; i < rank; ++i) {
+            a->ir_res[i] = a->c_top_save[i] - a->ir_res[i];
+          }
+          BLAS(trsv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
+                     &aug_rows, a->ir_res, &one);
+          dnorm = BLAS(nrm2)(&brank, a->ir_res, &one);
+          BLAS(axpy)(&brank, &onef, a->ir_res, &one, a->gamma_red, &one);
+          if (k > 0 && dnorm >= 0.5 * prev_dnorm) break;
+          prev_dnorm = dnorm;
+        }
       }
-      BLAS(trsv)("Upper", "NoTrans", "NonUnit", &brank, a->A_aug,
-                 &aug_rows, a->ir_res, &one);
-      BLAS(axpy)(&brank, &onef, a->ir_res, &one, a->gamma_red, &one);
     }
 
     /* Un-permute γ_red into γ (natural column order); zero the rest so
@@ -481,12 +503,14 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
                 aa_float relaxation, aa_float safeguard_factor,
-                aa_float max_weight_norm, aa_int verbosity) {
+                aa_float max_weight_norm, aa_int ir_max_steps,
+                aa_int verbosity) {
   TIME_TIC
   AaWork *a;
   if (dim <= 0 || mem < 0 || regularization < 0 ||
       relaxation < 0 || relaxation > 2 ||
-      safeguard_factor < 0 || max_weight_norm <= 0) {
+      safeguard_factor < 0 || max_weight_norm <= 0 ||
+      ir_max_steps < 0) {
     printf("Invalid AA parameters.\n");
     return (AaWork *)0;
   }
@@ -503,6 +527,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->relaxation = relaxation;
   a->safeguard_factor = safeguard_factor;
   a->max_weight_norm = max_weight_norm;
+  a->ir_max_steps = ir_max_steps;
   a->success = 0;
   a->verbosity = verbosity;
   if (a->mem <= 0) {

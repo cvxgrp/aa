@@ -30,6 +30,13 @@ typedef struct ACCEL_WORK AaWork;
  * @param safeguard_factor  factor that controls safeguarding checks
  *                          larger is more aggressive but less stable
  * @param max_weight_norm   float, maximum norm of AA weights
+ * @param ir_max_steps      max iterative refinement passes on the γ solve.
+ *                          0 disables IR. Each step is O(mem²) and loops
+ *                          until the correction stops contracting, so on
+ *                          well-conditioned problems only one step runs
+ *                          regardless of this cap. Raise it (e.g. 5) for
+ *                          ill-conditioned systems where more digits can
+ *                          be recovered; lower it for tighter cost bounds.
  * @param verbosity         if greater than 0 prints out various info
  *
  * @return pointer to AA workspace
@@ -37,7 +44,8 @@ typedef struct ACCEL_WORK AaWork;
  */
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
                 aa_float relaxation, aa_float safeguard_factor,
-                aa_float max_weight_norm, aa_int verbosity);
+                aa_float max_weight_norm, aa_int ir_max_steps,
+                aa_int verbosity);
 
 /**
  * Apply Anderson Acceleration. The usage pattern should be as follows:

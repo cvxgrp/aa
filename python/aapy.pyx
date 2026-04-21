@@ -6,7 +6,7 @@ cdef extern from "../src/aa.c":
 cdef extern from "../include/aa.h":
     ctypedef struct AaWork:
         pass
-    AaWork *aa_init(int, int, int, double, double, double, double, int)
+    AaWork *aa_init(int, int, int, double, double, double, double, int, int)
     double aa_apply(double*, const double*, AaWork*)
     int aa_safeguard(double*, double*, AaWork*)
     void aa_reset(AaWork*)
@@ -18,7 +18,7 @@ cdef class AndersonAccelerator(object):
 
     def __cinit__(self, dim, mem, type1=False, regularization=1e-12,
                   relaxation=1.0, safeguard_factor=1.0, max_weight_norm=1e6,
-                  verbosity=0):
+                  ir_max_steps=5, verbosity=0):
         if dim <= 0:
             raise ValueError("dim must be positive")
         if mem < 0:
@@ -31,8 +31,11 @@ cdef class AndersonAccelerator(object):
             raise ValueError("safeguard_factor must be non-negative")
         if max_weight_norm <= 0:
             raise ValueError("max_weight_norm must be positive")
+        if ir_max_steps < 0:
+            raise ValueError("ir_max_steps must be non-negative")
         self._wrk = aa_init(dim, mem, type1, regularization, relaxation,
-                            safeguard_factor, max_weight_norm, verbosity)
+                            safeguard_factor, max_weight_norm, ir_max_steps,
+                            verbosity)
         if self._wrk is NULL:
             raise MemoryError("aa_init failed")
         self._dim = dim

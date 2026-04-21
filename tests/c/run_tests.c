@@ -136,7 +136,8 @@ static const char *gd(aa_int type1, aa_float relaxation) {
   }
 
   AaWork *a = aa_init(n, memory, type1, regularization, relaxation,
-                      safeguard_tolerance, max_aa_norm, verbosity);
+                      safeguard_tolerance, max_aa_norm, /*ir_max_steps=*/5,
+                      verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       _tic(&aa_timer);
@@ -193,7 +194,8 @@ static aa_float diag_gd(const aa_float *Qdiag, aa_int n, aa_float step,
     x[i] = rand_float();
   }
   AaWork *a = aa_init(n, mem, type1, /*reg=*/1e-10, relaxation,
-                      /*safeguard=*/2.0, /*max_w=*/1e10, /*verbosity=*/0);
+                      /*safeguard=*/2.0, /*max_w=*/1e10, /*ir_max_steps=*/5,
+                      /*verbosity=*/0);
   for (aa_int i = 0; i < iters; i++) {
     if (i > 0) {
       aa_apply(x, xprev, a);
@@ -214,7 +216,7 @@ static aa_float diag_gd(const aa_float *Qdiag, aa_int n, aa_float step,
 /* aa_init with mem=0 must not crash and both apply/safeguard must be
  * no-ops (this path is what callers use to turn AA off dynamically). */
 static const char *test_mem_zero_is_noop(void) {
-  AaWork *a = aa_init(10, 0, 1, 1e-8, 1.0, 2.0, 1e10, 0);
+  AaWork *a = aa_init(10, 0, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   mu_assert("aa_init(mem=0) returned NULL", a != NULL);
 
   aa_float x[10], xprev[10];
@@ -239,7 +241,7 @@ static const char *test_mem_zero_is_noop(void) {
 }
 
 static const char *test_dim_zero_rejected(void) {
-  AaWork *a = aa_init(0, 1, 1, 1e-8, 1.0, 2.0, 1e10, 0);
+  AaWork *a = aa_init(0, 1, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   mu_assert("aa_init(dim=0) should return NULL", a == NULL);
   return 0;
 }
@@ -285,7 +287,7 @@ static const char *test_reset_matches_fresh_init(void) {
   aa_float step = 1.0;
   aa_float x0[5] = {1, 1, 1, 1, 1};
 
-  AaWork *a = aa_init(n, 3, 1, 1e-10, 1.0, 2.0, 1e10, 0);
+  AaWork *a = aa_init(n, 3, 1, 1e-10, 1.0, 2.0, 1e10, 5, 0);
 
   /* First run: 20 iters from x0. */
   aa_float x[5], xprev[5];
@@ -320,7 +322,7 @@ static const char *test_reset_matches_fresh_init(void) {
 /* reset must clear any "last AA step succeeded" state so a subsequent
  * safeguard call cannot roll inputs back to pre-reset iterates. */
 static const char *test_reset_clears_stale_safeguard_state(void) {
-  AaWork *a = aa_init(2, 2, 1, 1e-8, 1.0, 1.0, 1e10, 0);
+  AaWork *a = aa_init(2, 2, 1, 1e-8, 1.0, 1.0, 1e10, 5, 0);
   aa_float x[2] = {1.0, 1.0};
   aa_float f[2] = {0.5, 0.5};
 
@@ -449,7 +451,7 @@ static const char *test_zero_reg_near_singular_y(void) {
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   AaWork *a = aa_init(n, /*mem=*/10, /*type1=*/0, /*reg=*/0.0,
                       /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
-                      /*verbosity=*/0);
+                      /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < 2000; i++) {
     if (i > 0) aa_apply(x, xprev, a);
     memcpy(xprev, x, n * sizeof(aa_float));
@@ -508,7 +510,7 @@ static const char *test_rank_deficient_memory_oversized_mem(void) {
   /* mem=20, much larger than the ≈3 effective directions in Y. */
   AaWork *a = aa_init(n, /*mem=*/20, /*type1=*/1, /*reg=*/1e-10,
                       /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
-                      /*verbosity=*/0);
+                      /*ir_max_steps=*/5, /*verbosity=*/0);
   aa_int applies = 0, rejects = 0;
   const aa_int iters = 500;
   for (aa_int i = 0; i < iters; i++) {
@@ -541,7 +543,7 @@ static const char *test_rank_deficient_memory_oversized_mem(void) {
  * unconditionally call aa_apply without branching. */
 static const char *test_first_iter_is_noop_on_f(void) {
   const aa_int n = 4;
-  AaWork *a = aa_init(n, 3, 1, 1e-8, 1.0, 2.0, 1e10, 0);
+  AaWork *a = aa_init(n, 3, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   aa_float x[4] = {0.1, 0.2, 0.3, 0.4};
   aa_float xprev[4] = {0, 0, 0, 0};
   aa_float snapshot[4];

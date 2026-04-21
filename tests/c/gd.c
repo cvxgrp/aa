@@ -143,7 +143,8 @@ int main(int argc, char **argv) {
   }
 
   AaWork *a = aa_init(n, memory, type1, regularization, relaxation,
-                      safeguard_tolerance, max_aa_norm, verbosity);
+                      safeguard_tolerance, max_aa_norm, /*ir_max_steps=*/5,
+                      verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       _tic(&aa_timer);
