@@ -398,6 +398,77 @@ static const char *test_mem_one_type2(void) {
   return 0;
 }
 
+/* Running past machine-precision convergence: S, Y columns saturate at
+ * denormal noise, the Gram matrix becomes catastrophically singular.
+ * Under the pre-QR normal-equations solve this manifested as NaN-valued
+ * γ weights and (without the isfinite guard) NaN iterates propagating
+ * back through F. The QR path should keep iterates finite indefinitely
+ * without needing a guard to catch a blown-up weight vector. */
+static const char *test_post_convergence_stays_finite(void) {
+  const aa_int n = 50;
+  aa_float Qdiag[50];
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / (aa_float)(n - 1);
+  }
+  aa_float err = diag_gd(Qdiag, n, /*step=*/1.0, /*mem=*/5, /*type1=*/0,
+                         /*relax=*/1.0, /*iters=*/2000, /*seed=*/17);
+  mu_assert("post-convergence iterate is not finite", isfinite(err));
+  return 0;
+}
+
+/* QR is well-defined even with regularization=0 and Y columns that
+ * overlap heavily (near-singular) — the augmented [A; 0] reduces to A
+ * and QR still extracts the rank-revealing triangular factor. This test
+ * runs long enough to saturate at floating-point floor; without the QR
+ * path it blows up. */
+static const char *test_zero_reg_near_singular_y(void) {
+  const aa_int n = 50;
+  aa_float Qdiag[50];
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / (aa_float)(n - 1);
+  }
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(23);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  AaWork *a = aa_init(n, /*mem=*/10, /*type1=*/0, /*reg=*/0.0,
+                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*verbosity=*/0);
+  for (aa_int i = 0; i < 2000; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("zero-reg near-singular run produced non-finite iterate",
+            isfinite(err));
+  return 0;
+}
+
+/* Hostile conditioning: κ(Q) = 1e10. The normal-equations solve squares
+ * this to 1e20, well past double precision; QR keeps it at 1e10 so the
+ * solver still produces bounded weights and AA still converges. */
+static const char *test_ill_conditioned_gd(void) {
+  const aa_int n = 40;
+  aa_float Qdiag[40];
+  for (int i = 0; i < n; i++) {
+    aa_float t = (aa_float)i / (aa_float)(n - 1);
+    Qdiag[i] = 1e-10 + (1.0 - 1e-10) * t; /* eigs in [1e-10, 1] */
+  }
+  aa_float err = diag_gd(Qdiag, n, /*step=*/1.0, /*mem=*/10, /*type1=*/0,
+                         /*relax=*/1.0, /*iters=*/2000, /*seed=*/3);
+  mu_assert("ill-conditioned run produced non-finite iterate",
+            isfinite(err));
+  /* Plain GD on this problem would still be at ||x|| ~ 1 after 2000 iters
+   * (slowest mode ~ 1 - 1e-10 step). AA should get well below that. */
+  mu_assert_less("AA failed to accelerate at kappa=1e10", err, 1e-2);
+  return 0;
+}
+
 /* First-iteration behavior: aa_apply on iter 0 must only seed internal
  * state and leave f untouched (return 0). This contract lets callers
  * unconditionally call aa_apply without branching. */
@@ -457,6 +528,12 @@ static const char *all_tests(void) {
   mu_run_test(test_reset_clears_stale_safeguard_state);
   printf("unit: cyclic buffer survives a long run\n");
   mu_run_test(test_cyclic_buffer_long_run);
+  printf("unit: iterates stay finite past machine-precision convergence\n");
+  mu_run_test(test_post_convergence_stays_finite);
+  printf("unit: zero regularization survives near-singular Y\n");
+  mu_run_test(test_zero_reg_near_singular_y);
+  printf("unit: AA still converges on kappa=1e10 problem\n");
+  mu_run_test(test_ill_conditioned_gd);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
 
