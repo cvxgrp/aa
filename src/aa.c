@@ -128,7 +128,8 @@ struct ACCEL_WORK {
   aa_float *Y; /* matrix of stacked y values */
   aa_float *S; /* matrix of stacked s values */
   aa_float *D; /* matrix of stacked d values = (S-Y) */
-  aa_float *M; /* S'Y or Y'Y depending on type of aa */
+  aa_float *M; /* scratch: regularized copy of M_full handed to gesv */
+  aa_float *M_full; /* persistent S'Y or Y'Y, updated one col/row per iter */
 
   /* workspace variables */
   aa_float *work; /* scratch space */
@@ -152,18 +153,65 @@ static aa_float compute_regularization(AaWork *a, aa_int len) {
   return r;
 }
 
-/* sets a->M to S'Y or Y'Y depending on type of aa used */
-/* M is len x len after this */
+/* Incremental Gram-matrix update. Called from update_accel_params after the
+ * new y (and s for type-I) has been written into column `idx` of Y (and S).
+ * Only that one column/row of M_full changes; rewrites them via one (or two)
+ * gemv calls of size dim x mem. For type-II M is symmetric so the row copy
+ * is a strided memcpy from the column we just computed. */
+static void update_m_col(AaWork *a, aa_int idx) {
+  TIME_TIC
+  blas_int bdim = (blas_int)a->dim;
+  blas_int bmem = (blas_int)a->mem;
+  blas_int one = 1;
+  aa_float onef = 1.0, zerof = 0.0;
+  aa_int k;
+
+  /* M_full[:, idx] = (S or Y)^T * Y[:, idx] */
+  BLAS(gemv)
+  ("Trans", &bdim, &bmem, &onef, a->type1 ? a->S : a->Y, &bdim,
+   &(a->Y[idx * a->dim]), &one, &zerof,
+   &(a->M_full[idx * a->mem]), &one);
+
+  if (a->type1) {
+    /* type-I: M[idx, k] = S[:, idx]^T * Y[:, k], which is a separate set of
+     * inner products — compute into the mem-sized scratch, then scatter. */
+    aa_float *tmp = a->work; /* work is sized for MAX(mem, dim), free here */
+    BLAS(gemv)
+    ("Trans", &bdim, &bmem, &onef, a->Y, &bdim,
+     &(a->S[idx * a->dim]), &one, &zerof, tmp, &one);
+    for (k = 0; k < a->mem; k++) {
+      a->M_full[idx + k * a->mem] = tmp[k];
+    }
+  } else {
+    /* type-II: M = Y^T Y is symmetric, so row idx = (col idx)^T */
+    for (k = 0; k < a->mem; k++) {
+      a->M_full[idx + k * a->mem] = a->M_full[k + idx * a->mem];
+    }
+  }
+  TIME_TOC
+}
+
+/* Hands M_full to the solver. With FILL_MEMORY_BEFORE_SOLVE=1 (the only
+ * path exercised in practice) len is always mem and we just copy + add
+ * regularization; gesv destroys its input, so M_full stays clean. If
+ * FILL_MEMORY_BEFORE_SOLVE=0 we fall back to a full gemm (partial-fill
+ * regime where the incremental cache isn't yet a Gram matrix). */
 static void set_m(AaWork *a, aa_int len) {
   TIME_TIC
   aa_int i;
-  blas_int bdim = (blas_int)(a->dim);
   blas_int blen = (blas_int)len;
-  aa_float onef = 1.0, zerof = 0.0, r;
-  /* if len < mem this only uses len cols */
-  BLAS(gemm)
-  ("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
-   a->Y, &bdim, &zerof, a->M, &blen);
+  aa_float r;
+
+  if (len == a->mem) {
+    memcpy(a->M, a->M_full, a->mem * a->mem * sizeof(aa_float));
+  } else {
+    blas_int bdim = (blas_int)(a->dim);
+    aa_float onef = 1.0, zerof = 0.0;
+    BLAS(gemm)
+    ("Trans", "No", &blen, &blen, &bdim, &onef, a->type1 ? a->S : a->Y, &bdim,
+     a->Y, &bdim, &zerof, a->M, &blen);
+  }
+
   if (a->regularization > 0) {
     r = compute_regularization(a, len);
     for (i = 0; i < len; ++i) {
@@ -230,6 +278,9 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   memcpy(&(a->D[idx * a->dim]), a->d, sizeof(aa_float) * a->dim);
 
   /* Y, S, D correct here */
+
+  /* incrementally refresh column idx (and row idx by symmetry) of M_full */
+  update_m_col(a, idx);
 
   /* set a->f and a->x for next iter (x_prev and f_prev) */
   memcpy(a->f, f, sizeof(aa_float) * a->dim);
@@ -370,6 +421,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
 
   a->M = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
+  a->M_full = (aa_float *)calloc(a->mem * a->mem, sizeof(aa_float));
   /* work is used as a len-sized (<=mem) scratch in solve(), but as a
    * dim-sized scratch in aa_safeguard(); size for the larger of the two. */
   a->work = (aa_float *)calloc(MAX(a->mem, a->dim), sizeof(aa_float));
@@ -384,7 +436,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   /* If any allocation failed, free the partial workspace and bail. aa_finish
    * is safe against NULL members. */
   if (!a->x || !a->f || !a->g || !a->g_prev || !a->y || !a->s || !a->d ||
-      !a->Y || !a->S || !a->D || !a->M || !a->work || !a->ipiv ||
+      !a->Y || !a->S || !a->D || !a->M || !a->M_full || !a->work || !a->ipiv ||
       (relaxation != 1.0 && !a->x_work)) {
     printf("Failed to allocate memory for AA.\n");
     aa_finish(a);
@@ -484,6 +536,7 @@ void aa_finish(AaWork *a) {
     free(a->S);
     free(a->D);
     free(a->M);
+    free(a->M_full);
     free(a->work);
     free(a->ipiv);
     if (a->x_work) {
@@ -536,6 +589,9 @@ void aa_reset(AaWork *a) {
   }
   if (a->M) {
     memset(a->M, 0, sizeof(aa_float) * a->mem * a->mem);
+  }
+  if (a->M_full) {
+    memset(a->M_full, 0, sizeof(aa_float) * a->mem * a->mem);
   }
   if (a->work) {
     memset(a->work, 0, sizeof(aa_float) * MAX(a->mem, a->dim));
