@@ -228,20 +228,33 @@ int main(void) {
   /* -------- Scan: dim --------
    * cond=1e6 + iters=300 keeps every size in the "still making progress"
    * regime so the timing comparison reflects productive AA work, not
-   * degenerate post-convergence spinning. */
-  print_header("scan:dim (fixed mem=10, type-II, cond=1e6)");
-  bench_cfg dim_sweep[] = {
+   * degenerate post-convergence spinning. Both types are swept because
+   * type-I is the dominant deployment for this library and carries
+   * extra per-iter cost in the QR path (second ormqr + gesv). */
+  print_header("scan:dim type-II (fixed mem=10, cond=1e6)");
+  bench_cfg dim_sweep_ii[] = {
       {"dim=10",      10,    10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=100",     100,   10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=1000",    1000,  10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=5000",    5000,  10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
       {"dim=20000",   20000, 10, 0, 1.0, 1e6, 300, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(dim_sweep)/sizeof(*dim_sweep); i++) run_one(dim_sweep[i]);
+  for (size_t i = 0; i < sizeof(dim_sweep_ii)/sizeof(*dim_sweep_ii); i++) run_one(dim_sweep_ii[i]);
 
-  /* -------- Scan: mem (set_m is quadratic in mem) -------- */
-  print_header("scan:mem (fixed dim=500, type-II, cond=1e4)");
-  bench_cfg mem_sweep[] = {
+  print_header("scan:dim type-I  (fixed mem=10, cond=1e6)");
+  bench_cfg dim_sweep_i[] = {
+      {"dim=10",      10,    10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=100",     100,   10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=1000",    1000,  10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=5000",    5000,  10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+      {"dim=20000",   20000, 10, 1, 1.0, 1e6, 300, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(dim_sweep_i)/sizeof(*dim_sweep_i); i++) run_one(dim_sweep_i[i]);
+
+  /* -------- Scan: mem (QR solve is O(dim * mem^2) so mem growth shows
+   * up clearly) -------- */
+  print_header("scan:mem type-II (fixed dim=500, cond=1e4)");
+  bench_cfg mem_sweep_ii[] = {
       {"mem=1",       500, 1,   0, 1.0, 1e4, 500, 1e-12, 0.0},
       {"mem=5",       500, 5,   0, 1.0, 1e4, 500, 1e-12, 0.0},
       {"mem=10",      500, 10,  0, 1.0, 1e4, 500, 1e-12, 0.0},
@@ -249,7 +262,18 @@ int main(void) {
       {"mem=50",      500, 50,  0, 1.0, 1e4, 500, 1e-12, 0.0},
       {"mem=100",     500, 100, 0, 1.0, 1e4, 500, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(mem_sweep)/sizeof(*mem_sweep); i++) run_one(mem_sweep[i]);
+  for (size_t i = 0; i < sizeof(mem_sweep_ii)/sizeof(*mem_sweep_ii); i++) run_one(mem_sweep_ii[i]);
+
+  print_header("scan:mem type-I  (fixed dim=500, cond=1e4)");
+  bench_cfg mem_sweep_i[] = {
+      {"mem=1",       500, 1,   1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=5",       500, 5,   1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=10",      500, 10,  1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=20",      500, 20,  1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=50",      500, 50,  1, 1.0, 1e4, 500, 1e-8, 0.0},
+      {"mem=100",     500, 100, 1, 1.0, 1e4, 500, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(mem_sweep_i)/sizeof(*mem_sweep_i); i++) run_one(mem_sweep_i[i]);
 
   /* -------- Scan: type -------- */
   print_header("scan:type (fixed dim=500, mem=10, cond=1e4)");
@@ -262,24 +286,42 @@ int main(void) {
   for (size_t i = 0; i < sizeof(type_sweep)/sizeof(*type_sweep); i++) run_one(type_sweep[i]);
 
   /* -------- Scan: cond -------- */
-  print_header("scan:cond (fixed dim=500, mem=10, type-II)");
-  bench_cfg cond_sweep[] = {
+  print_header("scan:cond type-II (fixed dim=500, mem=10)");
+  bench_cfg cond_sweep_ii[] = {
       {"cond=10",    500, 10, 0, 1.0, 10,   500,  1e-12, 0.0},
       {"cond=100",   500, 10, 0, 1.0, 100,  500,  1e-12, 0.0},
       {"cond=1e4",   500, 10, 0, 1.0, 1e4,  500,  1e-12, 0.0},
       {"cond=1e6",   500, 10, 0, 1.0, 1e6,  2000, 1e-12, 0.0},
       {"cond=1e8",   500, 10, 0, 1.0, 1e8,  2000, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(cond_sweep)/sizeof(*cond_sweep); i++) run_one(cond_sweep[i]);
+  for (size_t i = 0; i < sizeof(cond_sweep_ii)/sizeof(*cond_sweep_ii); i++) run_one(cond_sweep_ii[i]);
+
+  print_header("scan:cond type-I  (fixed dim=500, mem=10)");
+  bench_cfg cond_sweep_i[] = {
+      {"cond=10",    500, 10, 1, 1.0, 10,   500,  1e-8, 0.0},
+      {"cond=100",   500, 10, 1, 1.0, 100,  500,  1e-8, 0.0},
+      {"cond=1e4",   500, 10, 1, 1.0, 1e4,  500,  1e-8, 0.0},
+      {"cond=1e6",   500, 10, 1, 1.0, 1e6,  2000, 1e-8, 0.0},
+      {"cond=1e8",   500, 10, 1, 1.0, 1e8,  2000, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(cond_sweep_i)/sizeof(*cond_sweep_i); i++) run_one(cond_sweep_i[i]);
 
   /* -------- Relaxation (exercises x_work path) -------- */
-  print_header("relaxation (fixed dim=500, mem=10, cond=1e4)");
-  bench_cfg relax_sweep[] = {
+  print_header("relaxation type-II (fixed dim=500, mem=10, cond=1e4)");
+  bench_cfg relax_sweep_ii[] = {
       {"relax=1.0 (none)",  500, 10, 0, 1.0,  1e4, 1000, 1e-12, 0.0},
       {"relax=0.95",        500, 10, 0, 0.95, 1e4, 1000, 1e-12, 0.0},
       {"relax=1.2 (over)",  500, 10, 0, 1.2,  1e4, 1000, 1e-12, 0.0},
   };
-  for (size_t i = 0; i < sizeof(relax_sweep)/sizeof(*relax_sweep); i++) run_one(relax_sweep[i]);
+  for (size_t i = 0; i < sizeof(relax_sweep_ii)/sizeof(*relax_sweep_ii); i++) run_one(relax_sweep_ii[i]);
+
+  print_header("relaxation type-I  (fixed dim=500, mem=10, cond=1e4)");
+  bench_cfg relax_sweep_i[] = {
+      {"relax=1.0 (none)",  500, 10, 1, 1.0,  1e4, 1000, 1e-8, 0.0},
+      {"relax=0.95",        500, 10, 1, 0.95, 1e4, 1000, 1e-8, 0.0},
+      {"relax=1.2 (over)",  500, 10, 1, 1.2,  1e4, 1000, 1e-8, 0.0},
+  };
+  for (size_t i = 0; i < sizeof(relax_sweep_i)/sizeof(*relax_sweep_i); i++) run_one(relax_sweep_i[i]);
 
   /* -------- Near-optimum: machine-precision saturation ------------
    * Easy well-conditioned problems where AA converges to machine
