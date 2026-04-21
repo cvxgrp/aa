@@ -607,6 +607,84 @@ static const char *test_rank_deficient_memory_oversized_mem(void) {
   return 0;
 }
 
+/* Helper: run `iters` of GD+AA on a diagonal-Q problem with the given
+ * `regularization` value passed verbatim to aa_init (sign included, so
+ * negative selects the pinned branch). Seeds x from rand_float(), writes
+ * the final iterate to `x_out` (caller-owned, length n), and returns
+ * ||x||. */
+static aa_float diag_gd_with_reg(const aa_float *Qdiag, aa_int n, aa_float step,
+                                 aa_int mem, aa_int type1, aa_float reg,
+                                 aa_int iters, unsigned seed, aa_float *x_out) {
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(seed);
+  for (aa_int i = 0; i < n; i++) x_out[i] = rand_float();
+  AaWork *a = aa_init(n, mem, type1, reg, /*relax=*/1.0,
+                      /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*ir_max_steps=*/5, /*verbosity=*/0);
+  for (aa_int i = 0; i < iters; i++) {
+    if (i > 0) aa_apply(x_out, xprev, a);
+    memcpy(xprev, x_out, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x_out[j] -= step * Qdiag[j] * xprev[j];
+    aa_safeguard(x_out, xprev, a);
+  }
+  aa_float err = nrm2_vec(x_out, n);
+  aa_finish(a);
+  free(xprev);
+  return err;
+}
+
+/* Pinned-regularization mode: passing a negative value to aa_init means
+ * r is held fixed at |regularization|, skipping the Frobenius scaling.
+ * First confirm the pinned branch accepts negative reg and converges.
+ * Then distinguish pinned from scaled by running the *same* problem
+ * with reg=+R and reg=-R: scaled uses r = R·||A||_F·||Y||_F, pinned
+ * uses r = R, so the two regularizers differ by ||A||_F·||Y||_F — which
+ * on this problem is nowhere near 1. If a bug silently dropped the sign,
+ * both runs would produce bit-identical iterates. The assertion requires
+ * the final iterates to differ by more than rounding noise. */
+static const char *test_pinned_regularization(void) {
+  const aa_int n = 30;
+  aa_float Qdiag[30];
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = 0.05 + 0.95 * (aa_float)i / (aa_float)(n - 1);
+  }
+  aa_float *x_scaled = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *x_pinned = (aa_float *)calloc(n, sizeof(aa_float));
+
+  /* Smoke check: negative reg is accepted and the run converges. */
+  aa_float err_pinned = diag_gd_with_reg(
+      Qdiag, n, /*step=*/1.0, /*mem=*/5, /*type1=*/1,
+      /*reg=*/-1e-8, /*iters=*/1000, /*seed=*/11, x_pinned);
+  mu_assert("pinned-reg run produced non-finite iterate", isfinite(err_pinned));
+  mu_assert_less("pinned-reg failed to converge", err_pinned, 1e-8);
+
+  /* Distinguishing check: same problem, same seed, only the sign of
+   * `regularization` differs between runs. Use a short horizon so the
+   * difference hasn't been washed out by convergence. */
+  aa_float err_s = diag_gd_with_reg(
+      Qdiag, n, /*step=*/1.0, /*mem=*/5, /*type1=*/1,
+      /*reg=*/+1e-3, /*iters=*/20, /*seed=*/11, x_scaled);
+  aa_float err_p = diag_gd_with_reg(
+      Qdiag, n, /*step=*/1.0, /*mem=*/5, /*type1=*/1,
+      /*reg=*/-1e-3, /*iters=*/20, /*seed=*/11, x_pinned);
+  mu_assert("pinned/scaled runs produced non-finite iterate",
+            isfinite(err_s) && isfinite(err_p));
+  aa_float diff = 0;
+  for (aa_int i = 0; i < n; i++) {
+    aa_float d = x_scaled[i] - x_pinned[i];
+    diff += d * d;
+  }
+  diff = sqrt(diff);
+  /* A bug that ignored the sign would give diff == 0 exactly (same
+   * seed, same code path, same arithmetic). 1e-10 is comfortably above
+   * rounding noise yet far below the 20-iter trajectory scale. */
+  free(x_scaled);
+  free(x_pinned);
+  mu_assert("pinned branch produced bit-identical iterate to scaled (sign ignored?)",
+            diff > 1e-10);
+  return 0;
+}
+
 /* First-iteration behavior: aa_apply on iter 0 must only seed internal
  * state and leave f untouched (return 0). This contract lets callers
  * unconditionally call aa_apply without branching. */
@@ -682,6 +760,8 @@ static const char *all_tests(void) {
   mu_run_test(test_ill_conditioned_gd);
   printf("unit: rank-deficient memory with oversized mem converges\n");
   mu_run_test(test_rank_deficient_memory_oversized_mem);
+  printf("unit: pinned regularization mode works\n");
+  mu_run_test(test_pinned_regularization);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
 
