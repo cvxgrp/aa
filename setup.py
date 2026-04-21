@@ -61,6 +61,5 @@ aa_extension = Extension(
 setup(
     name=NAME,
     version=VERSION,
-    install_requires=["numpy"],
     ext_modules=cythonize([aa_extension], language_level=3),
 )
