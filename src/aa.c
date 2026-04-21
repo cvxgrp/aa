@@ -22,6 +22,8 @@
  *
  */
 
+#include <math.h>
+
 #include "aa.h"
 #include "aa_blas.h"
 
@@ -291,8 +293,13 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
   }
 
-  /* info < 0 input error, input > 0 matrix is singular */
-  if (info != 0 || aa_norm >= a->max_weight_norm) {
+  /* info < 0 input error, info > 0 matrix is singular. gesv can also return
+   * info == 0 with NaN-valued weights when M is numerically rank-deficient
+   * but not LAPACK-singular (happens near the optimum when columns of Y
+   * become denormal); NaN propagates through the gemv below and poisons f.
+   * Guard explicitly with isfinite. Inf is already caught by the weight-norm
+   * check since Inf >= max_weight_norm. */
+  if (info != 0 || !isfinite(aa_norm) || aa_norm >= a->max_weight_norm) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, info: %i, aa_norm %.2e\n",
              a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)info, aa_norm);
@@ -301,6 +308,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     /* reset aa for stability */
     aa_reset(a);
     TIME_TOC
+    if (!isfinite(aa_norm)) aa_norm = -1.0;
     return (aa_norm < 0) ? aa_norm : -aa_norm;
   }
 
