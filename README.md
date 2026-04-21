@@ -209,6 +209,7 @@ To change these, compile with:
 ## Building the Python bindings from source
 
 ```bash
+python -m pip install --upgrade pip
 pip install cython numpy
 pip install -e .
 python python/example.py
