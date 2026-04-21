@@ -61,9 +61,6 @@ void BLAS(scal)(const blas_int *n, const aa_float *a, aa_float *x,
 void BLAS(trsv)(const char *uplo, const char *trans, const char *diag,
                 const blas_int *n, const aa_float *a, const blas_int *lda,
                 aa_float *x, const blas_int *incx);
-void BLAS(geqrf)(blas_int *m, blas_int *n, aa_float *a, blas_int *lda,
-                 aa_float *tau, aa_float *work, blas_int *lwork,
-                 blas_int *info);
 void BLAS(geqp3)(blas_int *m, blas_int *n, aa_float *a, blas_int *lda,
                  blas_int *jpvt, aa_float *tau, aa_float *work,
                  blas_int *lwork, blas_int *info);
