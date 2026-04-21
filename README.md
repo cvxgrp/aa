@@ -82,6 +82,7 @@ Q  = Qh.T @ Qh + 1e-3 * np.eye(dim)
 q  = rng.standard_normal(dim)
 eigs = np.linalg.eigvalsh(Q)
 step = 2.0 / (eigs.min() + eigs.max())  # optimal GD step for a quadratic
+x_star = np.linalg.solve(Q, q)          # true optimum, for error measurement
 
 acc = aa.AndersonAccelerator(dim, mem, type1=True, regularization=1e-8)
 
@@ -89,10 +90,11 @@ x = rng.standard_normal(dim)
 x_prev = x.copy()
 for i in range(N):
     if i > 0:
-        acc.apply(x, x_prev)           # in-place: overwrites x with AA extrapolate
+        _ = acc.apply(x, x_prev)       # in-place: overwrites x with AA extrapolate
     x_prev = x.copy()
     x = x - step * (Q @ x_prev - q)    # your map F — gradient step
-    acc.safeguard(x, x_prev)           # rolls back if AA didn't help
+    _ = acc.safeguard(x, x_prev)       # rolls back if AA didn't help
+    print(f"iter {i:4d}  ||x - x*|| = {np.linalg.norm(x - x_star):.3e}")
 ```
 
 Convergence on this problem for vanilla GD vs AA-accelerated GD (Type-I and
@@ -113,16 +115,14 @@ examples requires installing `matplotlib` (`pip install matplotlib`).
 ```c
 #include "aa.h"
 
-AaWork *a = aa_init(
-    n,      /* dim              */
-    10,     /* mem              */
-    1,      /* type1            */
-    1e-8,   /* regularization   */
-    1.0,    /* relaxation       */
-    2.0,    /* safeguard_factor */
-    1e10,   /* max_weight_norm  */
-    0       /* verbosity        */
-);
+AaWork *a = aa_init(n,     /* dim              */
+                    10,    /* mem              */
+                    1,     /* type1            */
+                    1e-8,  /* regularization   */
+                    1.0,   /* relaxation       */
+                    2.0,   /* safeguard_factor */
+                    1e10,  /* max_weight_norm  */
+                    0);    /* verbosity        */
 
 for (int i = 0; i < N; i++) {
     if (i > 0) aa_apply(x, x_prev, a);
