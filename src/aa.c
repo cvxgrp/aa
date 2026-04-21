@@ -163,7 +163,9 @@ struct ACCEL_WORK {
   aa_float *c_top_save;  /* original RHS preserved across the solve */
   aa_float *ir_res;      /* residual/correction vector */
 
-  /* dim-sized scratch used by aa_safeguard for the x_new - f_new diff. */
+  /* Dual-use scratch: dim-sized buffer for aa_safeguard's x_new - f_new
+   * diff, and also the natural-order γ home (len ≤ mem entries) inside
+   * solve(). Allocated as max(mem, dim) so both uses fit. */
   aa_float *work;
 
   aa_float *x_work; /* workspace (= x) for when relaxation != 1.0 */
