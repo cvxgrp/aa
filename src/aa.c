@@ -112,8 +112,9 @@ aa_float toc(const char *str, timer *t) {
 
 /* This file uses Anderson acceleration to improve the convergence of
  * a fixed point mapping.
- * At each iteration we need to solve a (small) linear system, we
- * do this using LAPACK ?gesv.
+ * At each iteration we solve a (small) regularized least-squares
+ * problem via a pivoted QR factorization of an augmented matrix,
+ * followed by iterative refinement on the reduced system.
  */
 
 /* contains the necessary parameters to perform aa at each step */
@@ -304,10 +305,11 @@ static void relax(aa_float *f, AaWork *a, aa_int len) {
  * exposes the numerical rank directly in the diagonal of R: we truncate
  * at the first diagonal whose magnitude falls below aug_rows·ε·|R_11|
  * and solve the smaller, well-conditioned system (graceful degradation
- * instead of hard reset on near-rank-deficiency). One step of iterative
- * refinement on the reduced system recovers the last few digits lost to
- * gesv/trsv rounding. A per-component L∞ check on γ rejects pathological
- * cancellation-heavy solutions the L2 weight-norm check can miss. */
+ * instead of hard reset on near-rank-deficiency). Iterative refinement
+ * on the reduced system recovers digits lost to gesv/trsv rounding; the
+ * loop auto-stops when the correction no longer contracts and is capped
+ * at ir_max_steps (see aa_init). γ is then validated against
+ * max_weight_norm in the L2 sense. */
 static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
   blas_int info = -1, bdim = (blas_int)(a->dim), one = 1, blen = (blas_int)len;
@@ -459,9 +461,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     }
   }
 
-  /* 5. Validate γ via ‖γ‖₂ against max_weight_norm. An L∞ bound would be
-   *    strictly redundant here: ‖γ‖_∞ ≤ ‖γ‖₂, so any γ with a component
-   *    above the threshold has already failed the 2-norm gate. */
+  /* 5. Validate γ via ‖γ‖₂ against max_weight_norm. */
   aa_norm = (info == 0) ? BLAS(nrm2)(&blen, gamma, &one) : -1.0;
 
   if (a->verbosity > 1) {

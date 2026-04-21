@@ -15,13 +15,14 @@ meaningful fraction of wall time.
 
 Sweeps:
     scan:dim        fixed mem, varies dim      (AA scaling in dim)
-    scan:mem        fixed dim, varies mem      (set_m/gemv scaling in mem)
+    scan:mem        fixed dim, varies mem      (QR scaling in mem)
     scan:type       type-I vs type-II
     scan:cond       varies conditioning        (convergence pressure)
     relaxation      exercises x_work path
     near-optimum    long run past machine-precision convergence — S,Y
-                    columns are denormal noise, M is catastrophically
-                    ill-conditioned. Exercises the aa_reset fallback.
+                    columns are denormal noise, A_aug is severely
+                    rank-deficient. Exercises rank truncation and the
+                    aa_reset fallback.
     noisy-floor     deterministic iter-dependent perturbation in F.
                     Iterates never converge — they bounce in a ball of
                     radius ~ noise_scale. This is the realistic
@@ -252,7 +253,7 @@ def main():
         BenchCfg("noise=1e-4 type-II", 200, 10, False, 1.0, 10, 2000, 1e-12, 1e-4),
         BenchCfg("noise=1e-4 type-I",  200, 10, True,  1.0, 10, 2000, 1e-8,  1e-4),
         # noise_scale = 1e-6: the regime the user pointed out — iterate
-        # differences of O(1e-6) and Gram-matrix signal of the same order.
+        # differences of O(1e-6); only ~6 digits of signal reach the QR.
         BenchCfg("noise=1e-6 type-II", 200, 10, False, 1.0, 10, 2000, 1e-12, 1e-6),
         BenchCfg("noise=1e-6 type-I",  200, 10, True,  1.0, 10, 2000, 1e-8,  1e-6),
         BenchCfg("noise=1e-6 mem=20",  200, 20, False, 1.0, 10, 2000, 1e-12, 1e-6),

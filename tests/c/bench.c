@@ -15,25 +15,26 @@
  *
  * Sweeps:
  *   scan:dim        fixed mem, varies dim        (shows AA scaling in dim)
- *   scan:mem        fixed dim, varies mem        (shows set_m/gemv in mem)
+ *   scan:mem        fixed dim, varies mem        (shows QR scaling in mem)
  *   scan:type       type-I vs type-II, same cfg
  *   scan:cond       varies conditioning          (convergence pressure)
  *   relaxation      relaxation != 1.0 path
  *   near-optimum    long run on an easy problem — after ~20 iters the
  *                   iterates are at machine precision, so S,Y columns
- *                   are denormal noise and M = Y^T Y is catastrophically
- *                   ill-conditioned. Exercises aa_apply's gesv-failure
- *                   path and the aa_reset fallback. Regressions in the
- *                   numerics show up here as blown-up final_err, NaNs,
- *                   or a change in the aa_rej/sg_rej counts.
+ *                   are denormal noise and A_aug is severely
+ *                   rank-deficient. Exercises the pivoted-QR rank
+ *                   truncation path (most iters) and the aa_reset
+ *                   fallback (when truncation yields rank 0). Regressions
+ *                   in the numerics show up here as blown-up final_err,
+ *                   NaNs, or a change in the aa_rej/sg_rej counts.
  *   noisy-floor     deterministic but iteration-dependent perturbation
  *                   injected into F(x). Iterates never fully converge —
  *                   they bounce within a ball of radius ~ noise_scale.
  *                   This is the *realistic* near-optimum regime (the
  *                   ~1e-6 iterate-difference world that real solvers
  *                   live in: stochastic gradients, approximate prox
- *                   operators, fixed tolerance on inner solves). Gram
- *                   matrix M is ill-conditioned but not denormal; it's
+ *                   operators, fixed tolerance on inner solves). A_aug
+ *                   is ill-conditioned but not rank-collapsed; it's
  *                   the hardest case for AA numerics because the signal
  *                   is O(noise_scale) and the noise is O(eps·|x|).
  *
@@ -328,8 +329,9 @@ int main(void) {
    * Easy well-conditioned problems where AA converges to machine
    * precision within ~20 iters; the remaining iterations run on
    * iterates of magnitude O(eps). S, Y columns are denormal noise
-   * and M = Y^T Y has condition number ~ 1/eps^2. This is the
-   * degenerate extreme — gesv starts failing and aa_reset fires.
+   * and A_aug is severely rank-deficient. This is the degenerate
+   * extreme — most iters land in the rank-truncation path and the
+   * occasional rank-0 case triggers aa_reset.
    */
   print_header("near-optimum: long runs past machine-precision convergence");
   bench_cfg near_opt[] = {
@@ -339,7 +341,7 @@ int main(void) {
       {"mem=50 tail",       200, 50, 0, 1.0, 10, 2000, 1e-12, 0.0},
       {"type-I saturate",   200, 10, 1, 1.0, 10, 2000, 1e-8,  0.0},
       /* Zero regularization amplifies ill-conditioning — a canary for
-       * the gesv-failure + aa_reset fallback. */
+       * the rank-truncation + aa_reset fallback. */
       {"no-reg saturate",   200, 10, 0, 1.0, 10, 2000, 0.0,   0.0},
   };
   for (size_t i = 0; i < sizeof(near_opt)/sizeof(*near_opt); i++) run_one(near_opt[i]);
@@ -349,11 +351,11 @@ int main(void) {
    * ball of radius ~noise_scale. Consecutive iterate differences
    * are O(noise_scale), not O(eps). This mimics what real solvers
    * see: stochastic gradients, approximate prox maps, inner solves
-   * with fixed tolerance. The Gram matrix M is ill-conditioned
-   * (signal is O(noise_scale), noise is O(eps·|x|)) but not
-   * denormal — which is actually harder for AA than the degenerate
-   * extreme above, because the regularization has to be tuned for
-   * it but there's no reset-on-failure safety net.
+   * with fixed tolerance. A_aug is ill-conditioned (signal is
+   * O(noise_scale), noise is O(eps·|x|)) but not rank-collapsed —
+   * which is actually harder for AA than the degenerate extreme
+   * above, because the regularization has to be tuned for it but
+   * the rank-truncation safety net rarely fires.
    */
   print_header("noisy-floor: realistic near-optimum regime, iter diffs ~ noise_scale");
   bench_cfg noisy[] = {
@@ -367,8 +369,8 @@ int main(void) {
       {"noise=1e-6 type-I",  200, 10, 1, 1.0, 10, 2000, 1e-8,  1e-6},
       {"noise=1e-6 mem=20",  200, 20, 0, 1.0, 10, 2000, 1e-12, 1e-6},
       /* noise_scale = 1e-8: tight — iterate differences of O(1e-8)
-       * with double precision gives ~8 digits of signal in the
-       * Gram matrix. Stress test. */
+       * with double precision gives ~8 digits of signal into the QR.
+       * Stress test. */
       {"noise=1e-8 type-II", 200, 10, 0, 1.0, 10, 2000, 1e-12, 1e-8},
       {"noise=1e-8 type-I",  200, 10, 1, 1.0, 10, 2000, 1e-8,  1e-8},
       /* Wider problems in the noisy regime: gemv dimension matters. */
