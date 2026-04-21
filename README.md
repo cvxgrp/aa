@@ -86,7 +86,7 @@ x_star = np.linalg.solve(Q, q)             # true optimum, for error measurement
 f = lambda x: 0.5 * x @ Q @ x - q @ x      # objective
 f_star = f(x_star)
 
-acc = aa.AndersonAccelerator(dim, mem, type1=True, regularization=1e-8)
+acc = aa.AndersonAccelerator(dim, mem, type1=False, regularization=1e-12)
 
 x = rng.standard_normal(dim)
 x_prev = x.copy()
