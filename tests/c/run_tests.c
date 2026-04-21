@@ -416,6 +416,22 @@ static const char *test_post_convergence_stays_finite(void) {
   return 0;
 }
 
+/* Low-residual regression specifically for the y = g - g_prev choice in
+ * update_accel_params. Near the optimum g and g_prev are both tiny and
+ * nearly equal, so y is a cancellation-prone quantity (single-rounding
+ * subtraction). Deriving y from s - d would add two extra roundings and
+ * visibly degrade it; an ordering bug that advances g_prev before y is
+ * built would also corrupt y. Either failure mode would stall or blow
+ * up a run like this well before reaching 1e-12. */
+static const char *test_low_residual_near_convergence(void) {
+  aa_float Qdiag[5] = {0.5, 0.7, 0.8, 0.9, 1.0};
+  aa_float err = diag_gd(Qdiag, 5, /*step=*/1.0, /*mem=*/3, /*type1=*/0,
+                         /*relax=*/1.0, /*iters=*/10000, /*seed=*/13);
+  mu_assert("near-convergence iterate is not finite", isfinite(err));
+  mu_assert_less("near-convergence err did not reach 1e-12", err, 1e-12);
+  return 0;
+}
+
 /* QR is well-defined even with regularization=0 and Y columns that
  * overlap heavily (near-singular) — the augmented [A; 0] reduces to A
  * and QR still extracts the rank-revealing triangular factor. This test
@@ -530,6 +546,8 @@ static const char *all_tests(void) {
   mu_run_test(test_cyclic_buffer_long_run);
   printf("unit: iterates stay finite past machine-precision convergence\n");
   mu_run_test(test_post_convergence_stays_finite);
+  printf("unit: iterates converge to low residual without blowup\n");
+  mu_run_test(test_low_residual_near_convergence);
   printf("unit: zero regularization survives near-singular Y\n");
   mu_run_test(test_zero_reg_near_singular_y);
   printf("unit: AA still converges on kappa=1e10 problem\n");
