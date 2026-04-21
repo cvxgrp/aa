@@ -5,6 +5,8 @@ requires = ["setuptools>=77", "wheel", "Cython>=3.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# Keep these in sync with setup.py, which duplicates them for legacy
+# setuptools/editable-install code paths.
 name = "anderson-acceleration"
 version = "0.0.1"
 description = "Anderson acceleration for fixed-point iterations"
