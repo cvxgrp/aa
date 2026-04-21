@@ -19,7 +19,7 @@ from Cython.Build import cythonize
 # synthesizing an `UNKNOWN` distribution. The canonical project metadata
 # still lives in pyproject.toml.
 NAME = "anderson-acceleration"
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 
 include_dirs = ["include"]
 library_dirs = []
