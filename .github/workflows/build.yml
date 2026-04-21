@@ -44,3 +44,5 @@ jobs:
         run: python -m pip install -e .
       - name: Run pytest suite
         run: pytest -v tests/python/test_aa.py
+      - name: Run Python benchmarks
+        run: python tests/python/bench.py

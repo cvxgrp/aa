@@ -1,5 +1,5 @@
 # MAKEFILE for aa
-.PHONY: default clean purge test
+.PHONY: default clean purge test bench
 
 OBJECTS = src/aa.o
 
@@ -19,7 +19,7 @@ OUT = out
 ARCHIVE = ar -rv
 RANLIB = ranlib
 
-default: $(OUT)/libaa.a $(OUT)/gd
+default: $(OUT)/libaa.a $(OUT)/gd $(OUT)/bench
 
 %.o : src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -34,14 +34,21 @@ $(OUT)/libaa.a: $(OBJECTS)
 $(OUT)/gd: tests/c/gd.c $(OUT)/libaa.a
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
+$(OUT)/bench: tests/c/bench.c $(OUT)/libaa.a
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
 clean:
 	@rm -rf $(OBJECTS)
 purge: clean
 	@rm -rf $(OUT)
 
-test: $(OUT)/run_tests $(OUT)/gd
+test: $(OUT)/run_tests $(OUT)/gd $(OUT)/bench
 	$(OUT)/run_tests
 	tests/c/check_gd_convergence.sh
+	$(OUT)/bench
+
+bench: $(OUT)/bench
+	$(OUT)/bench
 
 $(OUT)/run_tests: tests/c/run_tests.c $(OUT)/libaa.a
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
