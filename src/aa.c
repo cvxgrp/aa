@@ -315,7 +315,7 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
    * rows are kept zero by build_augmented. */
   blas_int aug_rows = bdim + (blas_int)a->mem;
   blas_int bmem = (blas_int)a->mem;
-  aa_float onef = 1.0, neg_onef = -1.0, aa_norm, aa_max = 0.0;
+  aa_float onef = 1.0, neg_onef = -1.0, aa_norm;
   aa_float *A_src = a->type1 ? a->S : a->Y;
   aa_float *gamma = a->work; /* natural-order γ, len entries used by gemv below */
   aa_int i;
@@ -437,30 +437,23 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     }
   }
 
-  /* 5. Validate γ: L2 norm (existing) and L∞ norm (new). The L∞ check
-   *    catches sign-flipping γ's where a couple of large components
-   *    cancel in ‖γ‖₂ but amplify roundoff in D γ. */
+  /* 5. Validate γ via ‖γ‖₂ against max_weight_norm. An L∞ bound would be
+   *    strictly redundant here: ‖γ‖_∞ ≤ ‖γ‖₂, so any γ with a component
+   *    above the threshold has already failed the 2-norm gate. */
   aa_norm = (info == 0) ? BLAS(nrm2)(&blen, gamma, &one) : -1.0;
-  if (info == 0) {
-    for (i = 0; i < len; ++i) {
-      aa_float g_i = fabs(gamma[i]);
-      if (g_i > aa_max) aa_max = g_i;
-    }
-  }
 
   if (a->verbosity > 1) {
-    printf("AA type %i, iter: %i, len %i, rank %i, info: %i, aa_norm %.2e, max_g %.2e\n",
+    printf("AA type %i, iter: %i, len %i, rank %i, info: %i, aa_norm %.2e\n",
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)rank, (int)info,
-           aa_norm, aa_max);
+           aa_norm);
   }
 
-  if (info != 0 || !isfinite(aa_norm) || aa_norm >= a->max_weight_norm ||
-      aa_max >= a->max_weight_norm) {
+  if (info != 0 || !isfinite(aa_norm) || aa_norm >= a->max_weight_norm) {
     if (a->verbosity > 0) {
       printf("Error in AA type %i, iter: %i, len %i, rank %i, info: %i, "
-             "aa_norm %.2e, max_g %.2e\n",
+             "aa_norm %.2e\n",
              a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)rank, (int)info,
-             aa_norm, aa_max);
+             aa_norm);
     }
     a->success = 0;
     aa_reset(a);
