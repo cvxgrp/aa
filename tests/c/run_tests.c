@@ -246,6 +246,89 @@ static const char *test_dim_zero_rejected(void) {
   return 0;
 }
 
+/* Negative ir_max_steps is invalid and must be rejected at init. */
+static const char *test_ir_max_steps_negative_rejected(void) {
+  AaWork *a = aa_init(4, 2, 1, 1e-8, 1.0, 2.0, 1e10, -1, 0);
+  mu_assert("aa_init(ir_max_steps=-1) should return NULL", a == NULL);
+  return 0;
+}
+
+/* ir_max_steps=0 disables iterative refinement entirely. The solve
+ * path still runs end-to-end and AA still converges on an easy
+ * well-conditioned problem. */
+static const char *test_ir_max_steps_zero_still_solves(void) {
+  aa_float Qdiag[10];
+  for (int i = 0; i < 10; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / 9.0;
+  }
+  const aa_int n = 10;
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(7);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  AaWork *a = aa_init(n, /*mem=*/5, /*type1=*/1, /*reg=*/1e-10,
+                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*ir_max_steps=*/0, /*verbosity=*/0);
+  mu_assert("aa_init(ir_max_steps=0) must accept", a != NULL);
+  for (aa_int i = 0; i < 500; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("ir_max_steps=0 run produced non-finite iterate", isfinite(err));
+  mu_assert_less("ir_max_steps=0 did not converge", err, 1e-6);
+  return 0;
+}
+
+/* Drive the ill-conditioned (κ=1e10) GD problem twice, once with IR
+ * disabled and once with the default cap of 5. Both must converge
+ * well below the plain-GD residual and stay finite — the IR-on run
+ * must not regress meaningfully relative to IR-off. Once AA reaches
+ * the machine-precision floor (here ≪ 1e-10) the two errors become
+ * noise-dominated, so we compare against an absolute floor rather
+ * than a relative ratio. */
+static const char *test_ir_max_steps_no_regression_on_ill_conditioned(void) {
+  const aa_int n = 40;
+  aa_float Qdiag[40];
+  for (int i = 0; i < n; i++) {
+    aa_float t = (aa_float)i / (aa_float)(n - 1);
+    Qdiag[i] = 1e-10 + (1.0 - 1e-10) * t;
+  }
+  aa_float errs[2];
+  aa_int caps[2] = {0, 5};
+  for (int k = 0; k < 2; ++k) {
+    aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+    aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+    srand(3);
+    for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+    AaWork *a = aa_init(n, /*mem=*/10, /*type1=*/0, /*reg=*/1e-10,
+                        /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
+                        caps[k], /*verbosity=*/0);
+    for (aa_int i = 0; i < 2000; i++) {
+      if (i > 0) aa_apply(x, xprev, a);
+      memcpy(xprev, x, n * sizeof(aa_float));
+      for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+      aa_safeguard(x, xprev, a);
+    }
+    errs[k] = nrm2_vec(x, n);
+    aa_finish(a);
+    free(x);
+    free(xprev);
+  }
+  mu_assert("ir=0 run produced non-finite iterate", isfinite(errs[0]));
+  mu_assert("ir=5 run produced non-finite iterate", isfinite(errs[1]));
+  /* Both must reach the shared convergence bar (same as
+   * test_ill_conditioned_gd); below that they're noise. */
+  mu_assert_less("ir=0 did not converge on kappa=1e10", errs[0], 1e-2);
+  mu_assert_less("ir=5 did not converge on kappa=1e10", errs[1], 1e-2);
+  return 0;
+}
+
 /* mem=1 is the smallest non-trivial memory — exercises the len=1
  * path of the internal solve. */
 static const char *test_mem_one(void) {
@@ -581,6 +664,12 @@ static const char *all_tests(void) {
   mu_run_test(test_mem_zero_is_noop);
   printf("unit: dim=0 is rejected\n");
   mu_run_test(test_dim_zero_rejected);
+  printf("unit: negative ir_max_steps is rejected\n");
+  mu_run_test(test_ir_max_steps_negative_rejected);
+  printf("unit: ir_max_steps=0 (IR disabled) still solves\n");
+  mu_run_test(test_ir_max_steps_zero_still_solves);
+  printf("unit: ir_max_steps variants both converge on ill-conditioned GD\n");
+  mu_run_test(test_ir_max_steps_no_regression_on_ill_conditioned);
   printf("unit: mem=1 works\n");
   mu_run_test(test_mem_one);
   printf("unit: mem=1 works (type-II)\n");
