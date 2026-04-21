@@ -144,17 +144,20 @@ struct ACCEL_WORK {
   aa_float *S; /* matrix of stacked s values */
   aa_float *D; /* matrix of stacked d values = (S-Y) */
 
-  /* Per-column cached squared L2 norms of S and Y (length mem). Each slot
-   * is rewritten when its column is rewritten (update_accel_params), and
-   * compute_regularization sums them to form ||S||_F² / ||Y||_F² in O(mem)
-   * instead of the original O(dim·mem) nrm2 over the whole matrix. Storing
-   * per-column avoids the drift of an incremental "subtract old / add new"
-   * scheme: near convergence Y columns can shrink by many orders of
-   * magnitude and the add/subtract updates would fall below the running
-   * sum's rounding floor, pegging the total above the true Frobenius norm
-   * (observed on the κ=1e10 stress test). */
-  aa_float *nrm_s_col_sq;
-  aa_float *nrm_y_col_sq;
+  /* Per-column cached L2 norms of S and Y (length mem). Each slot is
+   * rewritten when its column is rewritten (update_accel_params), and
+   * compute_regularization reduces these with a max-scaled sum to form
+   * ||S||_F / ||Y||_F in O(mem) — versus the original O(dim·mem) nrm2
+   * over the whole matrix. Storing per-column (not incremental "subtract
+   * old / add new") avoids drift: near convergence Y columns can shrink
+   * by many orders of magnitude and add/subtract updates fall below the
+   * running sum's rounding floor, pegging the total above the true
+   * Frobenius norm (observed on the κ=1e10 stress test). Storing the
+   * norm (not its square) preserves nrm2's overflow/underflow safety —
+   * squaring a 1e200 or 1e-200 column norm would hit ±inf / 0 even
+   * though nrm2 on the whole matrix would produce a finite answer. */
+  aa_float *nrm_s_col;
+  aa_float *nrm_y_col;
 
   /* QR workspaces, sized for the augmented problem. */
   aa_float *A_aug;   /* (dim + mem) x mem  -- [A; √r I]; factored in place */
@@ -183,24 +186,39 @@ struct ACCEL_WORK {
   aa_float *x_work; /* workspace (= x) for when relaxation != 1.0 */
 };
 
+/* Reduce a length-`mem` vector of nonnegative column norms to a single
+ * Frobenius norm ||A||_F = sqrt(Σ nrm_col_i²), using the classic
+ * max-scaled sum of squares so we don't square-then-overflow on a
+ * large column or square-then-underflow on a tiny one. This mirrors
+ * what nrm2 does internally across elements, but here across column
+ * norms — each nrm_col_i is already nrm2-safe per column. */
+static aa_float frob_from_col_norms(const aa_float *nrm_col, aa_int mem) {
+  aa_int i;
+  aa_float m = 0;
+  for (i = 0; i < mem; ++i) {
+    if (nrm_col[i] > m) m = nrm_col[i];
+  }
+  if (m == 0) return 0;
+  aa_float sumsq = 0;
+  for (i = 0; i < mem; ++i) {
+    aa_float t = nrm_col[i] / m;
+    sumsq += t * t;
+  }
+  return m * sqrt(sumsq);
+}
+
 /* Tikhonov regularization scaled with the problem. Matches the prior
  * behavior's intent (r grows with the magnitude of A'B so `regularization`
  * stays unitless), but uses the cheap Frobenius-norm upper bound
  *     ||A'B||_F ≤ ||A||_F · ||B||_F
  * instead of maintaining a Gram matrix. For type-II A == B so this is
  * ||Y||_F², the same scale as the previous ||Y'Y||_F up to a factor
- * ≤ √mem. Sums the per-column cached squared norms (O(mem)) rather than
- * a fresh nrm2 over dim·mem entries. */
+ * ≤ √mem. Reduces the per-column cached norms (O(mem)) rather than a
+ * fresh nrm2 over dim·mem entries. */
 static aa_float compute_regularization(AaWork *a) {
   TIME_TIC
-  aa_int i;
-  aa_float sum_s = 0, sum_y = 0;
-  for (i = 0; i < a->mem; ++i) {
-    sum_s += a->nrm_s_col_sq[i];
-    sum_y += a->nrm_y_col_sq[i];
-  }
-  aa_float nrm_a = sqrt(a->type1 ? sum_s : sum_y);
-  aa_float nrm_y = sqrt(sum_y);
+  aa_float nrm_y = frob_from_col_norms(a->nrm_y_col, a->mem);
+  aa_float nrm_a = a->type1 ? frob_from_col_norms(a->nrm_s_col, a->mem) : nrm_y;
   aa_float r = a->regularization * nrm_a * nrm_y;
   if (a->verbosity > 2) {
     printf("iter: %i, ||A||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
@@ -285,14 +303,12 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   memcpy(y_col, a->g, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, y_col, &one);
 
-  /* Update the per-column cached squared norms for the slot we just
-   * rewrote. compute_regularization sums these on demand. */
-  {
-    aa_float new_s = BLAS(nrm2)(&bdim, s_col, &one);
-    aa_float new_y = BLAS(nrm2)(&bdim, y_col, &one);
-    a->nrm_s_col_sq[idx] = new_s * new_s;
-    a->nrm_y_col_sq[idx] = new_y * new_y;
-  }
+  /* Update the per-column cached norms for the slot we just rewrote.
+   * compute_regularization reduces these on demand. Store the norm
+   * itself (not its square) — squaring here would throw away the
+   * overflow/underflow safety that nrm2 guarantees. */
+  a->nrm_s_col[idx] = BLAS(nrm2)(&bdim, s_col, &one);
+  a->nrm_y_col[idx] = BLAS(nrm2)(&bdim, y_col, &one);
 
   /* State advance for next iter: (x_prev, f_prev, g_prev) <- (x, f, g).
    * Must follow all the reads above. */
@@ -602,8 +618,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
     a->ir_res = (aa_float *)calloc(a->mem, sizeof(aa_float));
 
     /* Per-column squared norms used by compute_regularization. */
-    a->nrm_s_col_sq = (aa_float *)calloc(a->mem, sizeof(aa_float));
-    a->nrm_y_col_sq = (aa_float *)calloc(a->mem, sizeof(aa_float));
+    a->nrm_s_col = (aa_float *)calloc(a->mem, sizeof(aa_float));
+    a->nrm_y_col = (aa_float *)calloc(a->mem, sizeof(aa_float));
 
     /* type-I needs a second augmented buffer and mem×mem gesv scratches;
      * W_orig preserves W across gesv so iterative refinement can form
@@ -635,7 +651,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
         !a->Y || !a->S || !a->D ||
         !a->A_aug || !a->c_aug || !a->tau || !a->jpvt ||
         !a->gamma_red || !a->c_top_save || !a->ir_res ||
-        !a->nrm_s_col_sq || !a->nrm_y_col_sq ||
+        !a->nrm_s_col || !a->nrm_y_col ||
         (type1 && (!a->B_aug || !a->W || !a->W_orig || !a->ipiv)) ||
         !a->work ||
         (relaxation != 1.0 && !a->x_work)) {
@@ -787,8 +803,8 @@ void aa_finish(AaWork *a) {
     free(a->gamma_red);
     free(a->c_top_save);
     free(a->ir_res);
-    free(a->nrm_s_col_sq);
-    free(a->nrm_y_col_sq);
+    free(a->nrm_s_col);
+    free(a->nrm_y_col);
     free(a->work);
     if (a->x_work) {
       free(a->x_work);
@@ -864,11 +880,11 @@ void aa_reset(AaWork *a) {
   if (a->ir_res) {
     memset(a->ir_res, 0, sizeof(aa_float) * a->mem);
   }
-  if (a->nrm_s_col_sq) {
-    memset(a->nrm_s_col_sq, 0, sizeof(aa_float) * a->mem);
+  if (a->nrm_s_col) {
+    memset(a->nrm_s_col, 0, sizeof(aa_float) * a->mem);
   }
-  if (a->nrm_y_col_sq) {
-    memset(a->nrm_y_col_sq, 0, sizeof(aa_float) * a->mem);
+  if (a->nrm_y_col) {
+    memset(a->nrm_y_col, 0, sizeof(aa_float) * a->mem);
   }
   if (a->work) {
     memset(a->work, 0, sizeof(aa_float) * MAX(a->mem, a->dim));

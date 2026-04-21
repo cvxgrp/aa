@@ -103,6 +103,40 @@ def test_construct_invalid_args_raise_value_error(kwargs, message):
         aa.AndersonAccelerator(**kwargs)
 
 
+def test_negative_regularization_pinned_mode():
+    """Negative `regularization` selects the pinned branch: r is held fixed
+    at |regularization| (no Frobenius scaling). Verify (a) construction and
+    a convergence run succeed, and (b) the pinned branch is not a silent
+    fallthrough to the scaled branch — same problem with reg=+R and reg=-R
+    must produce different iterates (a sign-ignoring bug would give
+    bit-identical output).
+    """
+    Q, q, x_star, step = _make_quadratic(DIM, seed=3)
+    rng = np.random.default_rng(7)
+    x0 = rng.standard_normal(DIM)
+
+    acc_scaled = aa.AndersonAccelerator(DIM, MEM, type1=True, regularization=+1e-3)
+    acc_pinned = aa.AndersonAccelerator(DIM, MEM, type1=True, regularization=-1e-3)
+    x_scaled = _run_gd(Q, q, x0, step, steps=20, accelerator=acc_scaled)
+    x_pinned = _run_gd(Q, q, x0, step, steps=20, accelerator=acc_pinned)
+
+    assert np.isfinite(x_scaled).all()
+    assert np.isfinite(x_pinned).all()
+    diff = float(np.linalg.norm(x_scaled - x_pinned))
+    # A bug that silently treated negative reg as scaled would make this 0.
+    # 1e-10 is comfortably above rounding noise and far below the
+    # 20-iter trajectory scale on this problem.
+    assert diff > 1e-10, (
+        f"pinned and scaled produced (near-)identical iterates (diff={diff:.2e}); "
+        f"pinned branch may be a silent fallthrough"
+    )
+
+    # Smoke: pinned branch fully converges on a longer horizon.
+    acc_long = aa.AndersonAccelerator(DIM, MEM, type1=True, regularization=-1e-8)
+    x_long = _run_gd(Q, q, x0, step, steps=500, accelerator=acc_long)
+    assert np.linalg.norm(x_long - x_star) < 1e-6
+
+
 def test_dim_one_accelerates():
     """End-to-end exercise at dim=1 — the 1-D quadratic f(x) = 0.5 x^2 - x."""
     w = aa.AndersonAccelerator(1, MEM, type1=True, regularization=1e-8)
