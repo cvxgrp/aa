@@ -385,6 +385,32 @@ static const char *test_cyclic_buffer_long_run(void) {
   return 0;
 }
 
+/* Low-residual / near-convergence regression.
+ *
+ * Guards the y = g - g_prev choice in update_accel_params. Near the
+ * optimum g and g_prev are both tiny and nearly equal, so y is already
+ * a cancellation-prone quantity (single-rounding subtraction). Deriving
+ * y indirectly from s - d would add two extra roundings and noticeably
+ * degrade y; an ordering bug that advances g_prev to the current g
+ * before y is built would also corrupt y. Either failure mode would
+ * stall or blow up this run.
+ *
+ * Well-conditioned diagonal quadratic, small mem so the normal-equations
+ * solve in the current (pre-QR) solver stays usable through the low-
+ * residual phase. Asserts the run stays finite AND reaches a small
+ * residual — a stale g_prev would blow up well before this threshold. */
+static const char *test_low_residual_near_convergence(void) {
+  aa_float Qdiag[5] = {0.5, 0.7, 0.8, 0.9, 1.0};
+  /* Type-II variant of the cyclic-buffer config: different solve path,
+   * different seed, still well-conditioned and small-mem so pre-QR
+   * normal equations stay usable through the low-residual phase. */
+  aa_float err = diag_gd(Qdiag, 5, /*step=*/1.0, /*mem=*/3, /*type1=*/0,
+                         /*relax=*/1.0, /*iters=*/10000, /*seed=*/13);
+  mu_assert("near-convergence iterate is not finite", isfinite(err));
+  mu_assert_less("near-convergence err did not reach 1e-12", err, 1e-12);
+  return 0;
+}
+
 /* Type-II with mem=1 — symmetric of test_mem_one, verifies both
  * types handle the len=1 solve path. */
 static const char *test_mem_one_type2(void) {
@@ -457,6 +483,8 @@ static const char *all_tests(void) {
   mu_run_test(test_reset_clears_stale_safeguard_state);
   printf("unit: cyclic buffer survives a long run\n");
   mu_run_test(test_cyclic_buffer_long_run);
+  printf("unit: iterates converge to low residual without blowup\n");
+  mu_run_test(test_low_residual_near_convergence);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
 

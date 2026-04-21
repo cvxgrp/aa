@@ -186,56 +186,60 @@ static void init_accel_params(const aa_float *x, const aa_float *f, AaWork *a) {
   TIME_TOC
 }
 
-/* updates the workspace parameters for aa for this iteration */
+/* updates the workspace parameters for aa for this iteration
+ *
+ * Writes this iteration's s, d, y columns directly into S, D, Y at slot
+ * `idx` — no intermediate scratch. Numerically sensitive because:
+ *
+ *  - y is computed as g - g_prev (ONE rounding into a cancellation-prone
+ *    quantity). Deriving y from s - d would add two extra roundings and
+ *    make y noticeably worse near convergence where g and g_prev are
+ *    tiny and nearly equal.
+ *
+ *  - The reads of a->x, a->f, a->g_prev all require the PREVIOUS
+ *    iteration's values, so state advance (x_prev <- x, f_prev <- f,
+ *    g_prev <- g) must happen AFTER everything that reads them. s uses
+ *    old a->x; d uses old a->f; y uses old a->g_prev. */
 static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
                                 aa_int len) {
-  /* at the start a->x = x_prev and a->f = f_prev */
+  /* Entry invariant:  a->x == x_prev, a->f == f_prev, a->g_prev == g_prev. */
   TIME_TIC
   aa_int idx = (a->iter - 1) % a->mem;
   blas_int one = 1;
   blas_int bdim = (blas_int)a->dim;
   aa_float neg_onef = -1.0;
-
-  /* Build the new s, d, y columns directly in the matrix slots; no
-   * intermediate scratch. g is still needed for the M'g solve later, so
-   * compute it into the standalone buffer as before. y = g - g_prev
-   * keeps the single-rounding subtraction (deriving y from s-d would
-   * add two extra roundings into a cancellation-prone quantity). */
   aa_float *s_col = &(a->S[idx * a->dim]);
   aa_float *d_col = &(a->D[idx * a->dim]);
   aa_float *y_col = &(a->Y[idx * a->dim]);
 
-  /* S[:, idx] = x - x_prev */
+  /* S[:, idx] = x - x_prev  (reads old a->x). */
   memcpy(s_col, x, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, a->x, &one, s_col, &one);
 
-  /* D[:, idx] = f - f_prev */
+  /* D[:, idx] = f - f_prev  (reads old a->f). */
   memcpy(d_col, f, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, a->f, &one, d_col, &one);
 
-  /* g = x - f */
+  /* g = x - f  (this iteration's residual; needed for the solve RHS). */
   memcpy(a->g, x, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, f, &one, a->g, &one);
 
-  /* Y[:, idx] = g - g_prev */
+  /* Y[:, idx] = g - g_prev  (reads old a->g_prev; single-rounding y). */
   memcpy(y_col, a->g, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, y_col, &one);
 
-  /* set a->f and a->x for next iter (x_prev and f_prev) */
-  memcpy(a->f, f, sizeof(aa_float) * a->dim);
+  /* State advance for next iter: (x_prev, f_prev, g_prev) <- (x, f, g).
+   * Must follow all the reads above. */
   memcpy(a->x, x, sizeof(aa_float) * a->dim);
+  memcpy(a->f, f, sizeof(aa_float) * a->dim);
+  memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
 
-  /* workspace for when relaxation != 1.0 */
+  /* Relaxation scratch (mirror of x); only present when relaxation != 1.0. */
   if (a->x_work) {
     memcpy(a->x_work, x, sizeof(aa_float) * a->dim);
   }
 
-  /* x, f correct here */
-
-  memcpy(a->g_prev, a->g, sizeof(aa_float) * a->dim);
-  /* g_prev set for next iter here */
-
-  /* compute ||g|| = ||f - x|| */
+  /* ||g|| = ||x - f|| (current residual norm, used by the safeguard). */
   a->norm_g = BLAS(nrm2)(&bdim, a->g, &one);
 
   TIME_TOC
