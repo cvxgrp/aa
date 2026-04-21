@@ -451,7 +451,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
 
     /* LAPACK workspace query: ask geqrf and ormqr for their preferred lwork,
      * then take the max. lwork = -1 makes the routine write the optimal
-     * size into work[0] without doing any factoring. */
+     * size into work[0] without doing any factoring. The optimal size is
+     * returned in an aa_float slot; round up with ceil before casting so a
+     * value like 255.9999 doesn't truncate to 255 and under-allocate. */
     {
       blas_int b_aug = (blas_int)aug_rows;
       blas_int b_mem = (blas_int)a->mem;
@@ -478,7 +480,7 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
         /* Floor at mem — some LAPACK builds return modest sizes; keep
          * a sane minimum. calloc of zero is implementation-defined. */
         if (lwork_f < (aa_float)a->mem) lwork_f = (aa_float)a->mem;
-        a->qr_lwork = (blas_int)lwork_f;
+        a->qr_lwork = (blas_int)ceil(lwork_f);
         a->qr_work = (aa_float *)calloc((size_t)a->qr_lwork, sizeof(aa_float));
       }
     }
