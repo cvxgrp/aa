@@ -423,6 +423,51 @@ static const char *test_first_iter_is_noop_on_f(void) {
   return 0;
 }
 
+/* Long GD past machine-precision convergence. Once iterates saturate, Y's
+ * columns are denormal noise and M = Y'Y becomes numerically rank-deficient.
+ * gesv can return info=0 with NaN-valued weights; without an isfinite guard
+ * those NaNs flow through f -= D*work and poison the iterate. Regression
+ * test for that failure mode: after the accelerator has had ample chance
+ * to break down, f must still be finite. */
+static const char *test_post_convergence_stays_finite(void) {
+  const aa_int n = 50;
+  const aa_int mem = 5;
+  const aa_int iters = 2000;
+  aa_float *Qdiag = (aa_float *)malloc(sizeof(aa_float) * n);
+  for (aa_int i = 0; i < n; i++) {
+    /* eigs in [0.1, 1.0] — well-conditioned so GD drives x to 0 fast. */
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / (aa_float)(n - 1);
+  }
+
+  aa_float *x = (aa_float *)malloc(sizeof(aa_float) * n);
+  aa_float *xprev = (aa_float *)malloc(sizeof(aa_float) * n);
+  for (aa_int i = 0; i < n; i++) {
+    x[i] = sin((i + 1) * 0.1); /* deterministic, non-trivial init */
+  }
+
+  AaWork *a = aa_init(n, mem, /*type1=*/0, /*reg=*/1e-12, /*relax=*/1.0,
+                      /*safeguard=*/2.0, /*max_w=*/1e10, /*verbosity=*/0);
+  for (aa_int i = 0; i < iters; i++) {
+    if (i > 0) {
+      aa_apply(x, xprev, a);
+    }
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) {
+      x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    }
+    aa_safeguard(x, xprev, a);
+  }
+
+  aa_float err = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  free(Qdiag);
+
+  mu_assert("post-convergence iterate is not finite", isfinite(err));
+  return 0;
+}
+
 /* =============================================================== */
 
 static const char *all_tests(void) {
@@ -459,6 +504,8 @@ static const char *all_tests(void) {
   mu_run_test(test_cyclic_buffer_long_run);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
+  printf("unit: post-convergence iterates stay finite (NaN guard)\n");
+  mu_run_test(test_post_convergence_stays_finite);
 
   return 0;
 }
