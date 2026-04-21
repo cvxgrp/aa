@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 
 cdef extern from "../src/aa.c":
@@ -23,8 +25,12 @@ cdef class AndersonAccelerator(object):
             raise ValueError("dim must be positive")
         if mem < 0:
             raise ValueError("mem must be non-negative")
-        if regularization < 0:
-            raise ValueError("regularization must be non-negative")
+        # regularization accepts any finite value:
+        #   > 0  → scaled by ||A||_F ||Y||_F
+        #   < 0  → pinned absolute |regularization|
+        #   = 0  → off
+        if not math.isfinite(regularization):
+            raise ValueError("regularization must be finite")
         if relaxation < 0 or relaxation > 2:
             raise ValueError("relaxation must be in [0, 2]")
         if safeguard_factor < 0:

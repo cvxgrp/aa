@@ -91,7 +91,8 @@ def test_construct_dim_one():
     [
         (dict(dim=0, mem=MEM), "dim must be positive"),
         (dict(dim=DIM, mem=-1), "mem must be non-negative"),
-        (dict(dim=DIM, mem=MEM, regularization=-1.0), "regularization must be non-negative"),
+        (dict(dim=DIM, mem=MEM, regularization=float("nan")), "regularization must be finite"),
+        (dict(dim=DIM, mem=MEM, regularization=float("inf")), "regularization must be finite"),
         (dict(dim=DIM, mem=MEM, relaxation=3.0), "relaxation must be in \\[0, 2\\]"),
         (dict(dim=DIM, mem=MEM, safeguard_factor=-1.0), "safeguard_factor must be non-negative"),
         (dict(dim=DIM, mem=MEM, max_weight_norm=0.0), "max_weight_norm must be positive"),

@@ -147,7 +147,7 @@ See [`tests/c/gd.c`](tests/c/gd.c) for a complete runnable example
 | `dim`              | Problem dimension                                                                                 | your variable size                      |
 | `mem`              | Number of past iterates to look back                                                              | 5 – 20                                  |
 | `type1`            | Type-I if true, Type-II otherwise                                                                 | see notes below                         |
-| `regularization`   | Tikhonov regularization on the AA least-squares system                                            | Type-I: `1e-8`, Type-II: `1e-12`        |
+| `regularization`   | Tikhonov regularization on the AA least-squares system. `> 0`: scaled by `‖A‖_F·‖Y‖_F`. `< 0`: pinned absolute `-regularization` (no scaling). `= 0`: off. | Type-I: `1e-8`, Type-II: `1e-12`        |
 | `relaxation`       | Mixing parameter in `[0, 2]`; `1.0` is vanilla AA                                                 | `1.0`                                   |
 | `safeguard_factor` | Multiplier on the residual-growth ratio beyond which the AA step is rejected. Larger = more aggressive. | `2.0`                                   |
 | `max_weight_norm`  | Upper bound on the norm of the AA combination weights; rejects numerically unstable steps         | `1e6` – `1e10`                          |

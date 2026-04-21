@@ -24,8 +24,16 @@ typedef struct ACCEL_WORK AaWork;
  * @param dim               the dimension of the variable for AA
  * @param mem               the memory (number of past iterations used) for AA
  * @param type1             if True use type 1 AA, otherwise use type 2
- * @param regularization    type-I and type-II different, for type-I: 1e-8 works
- *                          well, type-II: more stable can use 1e-12 often
+ * @param regularization    Tikhonov regularization for the AA least-squares
+ *                          system. Three modes, selected by sign:
+ *                            > 0 : problem-scaled, r = regularization *
+ *                                  ||A||_F ||Y||_F. Type-I: 1e-8 works well;
+ *                                  Type-II: more stable, 1e-12 often fine.
+ *                            < 0 : pinned absolute, r = -regularization
+ *                                  (no Frobenius scaling — useful when the
+ *                                  problem scale is known).
+ *                            = 0 : no regularization.
+ *                          Only non-finite values (NaN/Inf) are rejected.
  * @param relaxation        float \in [0,2], mixing parameter (1.0 is vanilla)
  * @param safeguard_factor  factor that controls safeguarding checks
  *                          larger is more aggressive but less stable
