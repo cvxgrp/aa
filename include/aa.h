@@ -99,7 +99,7 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a);
 /**
  * Finish Anderson Acceleration, clears memory.
  *
- * @param a   AA workspace from aa_init
+ * @param a   AA workspace from aa_init, or NULL (no-op, like free()).
  *
  */
 void aa_finish(AaWork *a);
@@ -109,7 +109,7 @@ void aa_finish(AaWork *a);
  *
  * Resets AA as if at the first iteration, reuses original memory allocations.
  *
- * @param a   AA workspace from aa_init
+ * @param a   AA workspace from aa_init, or NULL (no-op).
  *
  */
 void aa_reset(AaWork *a);

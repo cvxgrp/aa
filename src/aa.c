@@ -584,6 +584,10 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->iter = 0;
   a->dim = dim;
   a->mem = MIN(mem, dim); /* for rank stability */
+  if (mem > dim && verbosity > 0) {
+    printf("AA: mem (%d) > dim (%d); clamping mem to dim.\n",
+           (int)mem, (int)dim);
+  }
   a->regularization = regularization;
   a->relaxation = relaxation;
   a->safeguard_factor = safeguard_factor;
@@ -814,7 +818,20 @@ void aa_finish(AaWork *a) {
 }
 
 void aa_reset(AaWork *a) {
-  /* reset to the same logical state as a freshly calloc'd workspace */
+  /* Restore the logical state of a freshly calloc'd workspace.
+   *
+   * Most internal buffers are fully overwritten before they are read:
+   *   - x, f, g_prev are re-seeded by init_accel_params on the next
+   *     aa_apply call (which runs when iter == 0).
+   *   - g, S/Y/D columns, A_aug/B_aug/c_aug, tau, jpvt, qr_work, W/W_orig,
+   *     gamma_red, c_top_save, ir_res, work, ipiv, x_work are all
+   *     rewritten inside update_accel_params / solve / relax each
+   *     iteration before any read.
+   *
+   * The only buffers that require zeroing are nrm_{s,y}_col: they are
+   * reduced over all `mem` slots in compute_regularization, and stale
+   * entries from an earlier run would contaminate the Frobenius-norm
+   * scale until every slot has been rewritten. */
   if (!a) {
     return;
   }
@@ -824,75 +841,10 @@ void aa_reset(AaWork *a) {
   a->iter = 0;
   a->success = 0;
   a->norm_g = 0;
-  if (a->x) {
-    memset(a->x, 0, sizeof(aa_float) * a->dim);
-  }
-  if (a->f) {
-    memset(a->f, 0, sizeof(aa_float) * a->dim);
-  }
-  if (a->g) {
-    memset(a->g, 0, sizeof(aa_float) * a->dim);
-  }
-  if (a->g_prev) {
-    memset(a->g_prev, 0, sizeof(aa_float) * a->dim);
-  }
-  if (a->Y) {
-    memset(a->Y, 0, sizeof(aa_float) * a->dim * a->mem);
-  }
-  if (a->S) {
-    memset(a->S, 0, sizeof(aa_float) * a->dim * a->mem);
-  }
-  if (a->D) {
-    memset(a->D, 0, sizeof(aa_float) * a->dim * a->mem);
-  }
-  if (a->A_aug) {
-    memset(a->A_aug, 0,
-           sizeof(aa_float) * (size_t)(a->dim + a->mem) * a->mem);
-  }
-  if (a->B_aug) {
-    memset(a->B_aug, 0,
-           sizeof(aa_float) * (size_t)(a->dim + a->mem) * a->mem);
-  }
-  if (a->c_aug) {
-    memset(a->c_aug, 0, sizeof(aa_float) * (size_t)(a->dim + a->mem));
-  }
-  if (a->tau) {
-    memset(a->tau, 0, sizeof(aa_float) * a->mem);
-  }
-  if (a->qr_work) {
-    memset(a->qr_work, 0, sizeof(aa_float) * (size_t)a->qr_lwork);
-  }
-  if (a->jpvt) {
-    memset(a->jpvt, 0, sizeof(blas_int) * a->mem);
-  }
-  if (a->W) {
-    memset(a->W, 0, sizeof(aa_float) * a->mem * a->mem);
-  }
-  if (a->W_orig) {
-    memset(a->W_orig, 0, sizeof(aa_float) * a->mem * a->mem);
-  }
-  if (a->gamma_red) {
-    memset(a->gamma_red, 0, sizeof(aa_float) * a->mem);
-  }
-  if (a->c_top_save) {
-    memset(a->c_top_save, 0, sizeof(aa_float) * a->mem);
-  }
-  if (a->ir_res) {
-    memset(a->ir_res, 0, sizeof(aa_float) * a->mem);
-  }
   if (a->nrm_s_col) {
     memset(a->nrm_s_col, 0, sizeof(aa_float) * a->mem);
   }
   if (a->nrm_y_col) {
     memset(a->nrm_y_col, 0, sizeof(aa_float) * a->mem);
-  }
-  if (a->work) {
-    memset(a->work, 0, sizeof(aa_float) * MAX(a->mem, a->dim));
-  }
-  if (a->ipiv) {
-    memset(a->ipiv, 0, sizeof(blas_int) * a->mem);
-  }
-  if (a->x_work) {
-    memset(a->x_work, 0, sizeof(aa_float) * a->dim);
   }
 }
