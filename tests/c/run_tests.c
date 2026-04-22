@@ -135,9 +135,9 @@ static const char *gd(aa_int type1, aa_float relaxation) {
     Q[i + i * n] += 1e-2;
   }
 
-  AaWork *a = aa_init(n, memory, type1, regularization, relaxation,
-                      safeguard_tolerance, max_aa_norm, /*ir_max_steps=*/5,
-                      verbosity);
+  AaWork *a = aa_init(n, memory, /*min_len=*/memory, type1,
+                      regularization, relaxation, safeguard_tolerance,
+                      max_aa_norm, /*ir_max_steps=*/5, verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       _tic(&aa_timer);
@@ -183,7 +183,10 @@ static const char *gd_type2_relaxl1(void) { return gd(0, 0.98); }
 
 /* Run diagonal-Q gradient descent (optionally with AA) and return
  * ||x|| after `iters` iterations. Qdiag must have strictly positive
- * entries; step is a fixed scalar. Pass mem=0 to disable AA. */
+ * entries; step is a fixed scalar. Pass mem=0 to disable AA.
+ *
+ * Uses min_len = mem so the solve only starts once memory is full, which
+ * is the historical default behavior most tests were written against. */
 static aa_float diag_gd(const aa_float *Qdiag, aa_int n, aa_float step,
                         aa_int mem, aa_int type1, aa_float relaxation,
                         aa_int iters, unsigned seed) {
@@ -193,9 +196,9 @@ static aa_float diag_gd(const aa_float *Qdiag, aa_int n, aa_float step,
   for (aa_int i = 0; i < n; i++) {
     x[i] = rand_float();
   }
-  AaWork *a = aa_init(n, mem, type1, /*reg=*/1e-10, relaxation,
-                      /*safeguard=*/2.0, /*max_w=*/1e10, /*ir_max_steps=*/5,
-                      /*verbosity=*/0);
+  AaWork *a = aa_init(n, mem, /*min_len=*/mem, type1, /*reg=*/1e-10,
+                      relaxation, /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < iters; i++) {
     if (i > 0) {
       aa_apply(x, xprev, a);
@@ -216,7 +219,10 @@ static aa_float diag_gd(const aa_float *Qdiag, aa_int n, aa_float step,
 /* aa_init with mem=0 must not crash and both apply/safeguard must be
  * no-ops (this path is what callers use to turn AA off dynamically). */
 static const char *test_mem_zero_is_noop(void) {
-  AaWork *a = aa_init(10, 0, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
+  /* min_len is ignored when mem=0 — pass the sentinel 0 to make that
+   * explicit (a nonzero value would also be accepted since the range
+   * check is gated on mem>0). */
+  AaWork *a = aa_init(10, 0, /*min_len=*/0, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   mu_assert("aa_init(mem=0) returned NULL", a != NULL);
 
   aa_float x[10], xprev[10];
@@ -241,14 +247,14 @@ static const char *test_mem_zero_is_noop(void) {
 }
 
 static const char *test_dim_zero_rejected(void) {
-  AaWork *a = aa_init(0, 1, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(0, 1, /*min_len=*/1, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   mu_assert("aa_init(dim=0) should return NULL", a == NULL);
   return 0;
 }
 
 /* Negative ir_max_steps is invalid and must be rejected at init. */
 static const char *test_ir_max_steps_negative_rejected(void) {
-  AaWork *a = aa_init(4, 2, 1, 1e-8, 1.0, 2.0, 1e10, -1, 0);
+  AaWork *a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, -1, 0);
   mu_assert("aa_init(ir_max_steps=-1) should return NULL", a == NULL);
   return 0;
 }
@@ -266,9 +272,9 @@ static const char *test_ir_max_steps_zero_still_solves(void) {
   aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
   srand(7);
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
-  AaWork *a = aa_init(n, /*mem=*/5, /*type1=*/1, /*reg=*/1e-10,
-                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
-                      /*ir_max_steps=*/0, /*verbosity=*/0);
+  AaWork *a = aa_init(n, /*mem=*/5, /*min_len=*/5, /*type1=*/1,
+                      /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/0, /*verbosity=*/0);
   mu_assert("aa_init(ir_max_steps=0) must accept", a != NULL);
   for (aa_int i = 0; i < 500; i++) {
     if (i > 0) aa_apply(x, xprev, a);
@@ -306,9 +312,9 @@ static const char *test_ir_max_steps_no_regression_on_ill_conditioned(void) {
     aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
     srand(3);
     for (aa_int i = 0; i < n; i++) x[i] = rand_float();
-    AaWork *a = aa_init(n, /*mem=*/10, /*type1=*/0, /*reg=*/1e-10,
-                        /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
-                        caps[k], /*verbosity=*/0);
+    AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/10, /*type1=*/0,
+                        /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
+                        /*max_w=*/1e10, caps[k], /*verbosity=*/0);
     for (aa_int i = 0; i < 2000; i++) {
       if (i > 0) aa_apply(x, xprev, a);
       memcpy(xprev, x, n * sizeof(aa_float));
@@ -379,7 +385,7 @@ static const char *test_reset_matches_fresh_init(void) {
   aa_float step = 1.0;
   aa_float x0[5] = {1, 1, 1, 1, 1};
 
-  AaWork *a = aa_init(n, 3, 1, 1e-10, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(n, 3, /*min_len=*/3, 1, 1e-10, 1.0, 2.0, 1e10, 5, 0);
 
   /* First run: 20 iters from x0. */
   aa_float x[5], xprev[5];
@@ -414,7 +420,7 @@ static const char *test_reset_matches_fresh_init(void) {
 /* reset must clear any "last AA step succeeded" state so a subsequent
  * safeguard call cannot roll inputs back to pre-reset iterates. */
 static const char *test_reset_clears_stale_safeguard_state(void) {
-  AaWork *a = aa_init(2, 2, 1, 1e-8, 1.0, 1.0, 1e10, 5, 0);
+  AaWork *a = aa_init(2, 2, /*min_len=*/2, 1, 1e-8, 1.0, 1.0, 1e10, 5, 0);
   aa_float x[2] = {1.0, 1.0};
   aa_float f[2] = {0.5, 0.5};
 
@@ -541,9 +547,9 @@ static const char *test_zero_reg_near_singular_y(void) {
   aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
   srand(23);
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
-  AaWork *a = aa_init(n, /*mem=*/10, /*type1=*/0, /*reg=*/0.0,
-                      /*relax=*/1.0, /*safeguard=*/2.0, /*max_w=*/1e10,
-                      /*ir_max_steps=*/5, /*verbosity=*/0);
+  AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/10, /*type1=*/0,
+                      /*reg=*/0.0, /*relax=*/1.0, /*safeguard=*/2.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < 2000; i++) {
     if (i > 0) aa_apply(x, xprev, a);
     memcpy(xprev, x, n * sizeof(aa_float));
@@ -618,7 +624,7 @@ static aa_float diag_gd_with_reg(const aa_float *Qdiag, aa_int n, aa_float step,
   aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
   srand(seed);
   for (aa_int i = 0; i < n; i++) x_out[i] = rand_float();
-  AaWork *a = aa_init(n, mem, type1, reg, /*relax=*/1.0,
+  AaWork *a = aa_init(n, mem, /*min_len=*/mem, type1, reg, /*relax=*/1.0,
                       /*safeguard=*/2.0, /*max_w=*/1e10,
                       /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < iters; i++) {
@@ -685,12 +691,182 @@ static const char *test_pinned_regularization(void) {
   return 0;
 }
 
+/* min_len=1: AA should start extrapolating on iter 1 (as soon as the first
+ * residual pair is buffered) and still converge comparably to min_len=mem
+ * on a well-conditioned problem. Without min_len you couldn't get this
+ * behavior with a large `mem` — the old code forced solve to wait for the
+ * memory to fill. */
+static const char *test_min_len_one_accelerates_early(void) {
+  const aa_int n = 10;
+  aa_float Qdiag[10];
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / (aa_float)(n - 1);
+  }
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(101);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/1, /*type1=*/0,
+                      /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init(min_len=1) returned NULL", a != NULL);
+  aa_int applies = 0;
+  for (aa_int i = 0; i < 100; i++) {
+    if (i > 0) {
+      aa_float w = aa_apply(x, xprev, a);
+      if (w > 0) applies++;
+    }
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("min_len=1 produced non-finite iterate", isfinite(err));
+  mu_assert_less("min_len=1 did not converge", err, 1e-6);
+  /* With min_len=1 and mem=10, the solve kicks in from iter 1. Previously
+   * (pre-min_len code) the first 9 solve calls were skipped while the
+   * memory filled. Require at least some extrapolation to have happened
+   * in the first 10 iters — a successful solve on iter 1 already pushes
+   * `applies` past the threshold the old code imposed (0). */
+  mu_assert("min_len=1 never accepted an AA step", applies > 0);
+  return 0;
+}
+
+/* min_len < mem: AA starts extrapolating partway through the memory
+ * warm-up. Exercise the "rank < mem" branch of the solve repeatedly
+ * before the buffer fills, and verify it still converges. */
+static const char *test_min_len_half_mem(void) {
+  aa_float Qdiag[10];
+  for (int i = 0; i < 10; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / 9.0;
+  }
+  aa_float *x = (aa_float *)calloc(10, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(10, sizeof(aa_float));
+  srand(202);
+  for (aa_int i = 0; i < 10; i++) x[i] = rand_float();
+  AaWork *a = aa_init(10, /*mem=*/8, /*min_len=*/4, /*type1=*/1,
+                      /*reg=*/1e-8, /*relax=*/1.0, /*safeguard=*/2.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init(min_len=4) returned NULL", a != NULL);
+  for (aa_int i = 0; i < 300; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, 10 * sizeof(aa_float));
+    for (aa_int j = 0; j < 10; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, 10);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("min_len=mem/2 produced non-finite iterate", isfinite(err));
+  mu_assert_less("min_len=mem/2 did not converge", err, 1e-6);
+  return 0;
+}
+
+/* min_len = mem: the historical default. Equivalent to the pre-min_len
+ * behavior where solve waited for the buffer to fill. */
+static const char *test_min_len_equal_mem_matches_default(void) {
+  aa_float Qdiag[10];
+  for (int i = 0; i < 10; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / 9.0;
+  }
+  aa_float err = diag_gd(Qdiag, 10, /*step=*/1.0, /*mem=*/5, /*type1=*/0,
+                         /*relax=*/1.0, /*iters=*/500, /*seed=*/55);
+  mu_assert_less("min_len=mem default run did not converge", err, 1e-6);
+  return 0;
+}
+
+/* min_len=0 with mem>0 must be rejected. */
+static const char *test_min_len_zero_rejected(void) {
+  AaWork *a = aa_init(5, /*mem=*/3, /*min_len=*/0, 1, 1e-8, 1.0,
+                      2.0, 1e10, 5, 0);
+  mu_assert("aa_init(min_len=0, mem=3) should return NULL", a == NULL);
+  return 0;
+}
+
+/* min_len is ignored when mem=0 — any value (incl 0 or nonsense) accepted. */
+static const char *test_min_len_ignored_when_mem_zero(void) {
+  AaWork *a = aa_init(5, /*mem=*/0, /*min_len=*/999, 1, 1e-8, 1.0,
+                      2.0, 1e10, 5, 0);
+  mu_assert("aa_init(mem=0) should accept any min_len", a != NULL);
+  aa_finish(a);
+  return 0;
+}
+
+/* min_len > mem is silently clamped (same story as mem > dim). Must
+ * still converge. */
+static const char *test_min_len_exceeding_mem_is_clamped(void) {
+  aa_float Qdiag[10];
+  for (int i = 0; i < 10; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / 9.0;
+  }
+  aa_float *x = (aa_float *)calloc(10, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(10, sizeof(aa_float));
+  srand(303);
+  for (aa_int i = 0; i < 10; i++) x[i] = rand_float();
+  AaWork *a = aa_init(10, /*mem=*/5, /*min_len=*/50, /*type1=*/0,
+                      /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init should clamp min_len > mem silently", a != NULL);
+  for (aa_int i = 0; i < 300; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, 10 * sizeof(aa_float));
+    for (aa_int j = 0; j < 10; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, 10);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("clamped min_len produced non-finite iterate", isfinite(err));
+  mu_assert_less("clamped min_len did not converge", err, 1e-6);
+  return 0;
+}
+
+/* Safeguard-reject churn with small min_len: after each rejection aa_reset
+ * zeroes iter, so the next solve needs min_len fresh pairs again before it
+ * will extrapolate. With min_len=1 the solve kicks back in on the very next
+ * iter, which is the point of the knob. Iterates must stay finite and
+ * converge regardless. */
+static const char *test_min_len_survives_safeguard_churn(void) {
+  const aa_int n = 40;
+  aa_float Qdiag[40];
+  for (int i = 0; i < n; i++) {
+    aa_float t = (aa_float)i / (aa_float)(n - 1);
+    Qdiag[i] = 1e-10 + (1.0 - 1e-10) * t; /* κ = 1e10 — triggers rejections */
+  }
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(13);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/1, /*type1=*/0,
+                      /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/1.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init(min_len=1) returned NULL", a != NULL);
+  for (aa_int i = 0; i < 2000; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+  aa_float err = nrm2_vec(x, n);
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  mu_assert("safeguard-churn run produced non-finite iterate", isfinite(err));
+  mu_assert_less("safeguard-churn run did not converge", err, 1e-2);
+  return 0;
+}
+
 /* First-iteration behavior: aa_apply on iter 0 must only seed internal
  * state and leave f untouched (return 0). This contract lets callers
  * unconditionally call aa_apply without branching. */
 static const char *test_first_iter_is_noop_on_f(void) {
   const aa_int n = 4;
-  AaWork *a = aa_init(n, 3, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(n, 3, /*min_len=*/3, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   aa_float x[4] = {0.1, 0.2, 0.3, 0.4};
   aa_float xprev[4] = {0, 0, 0, 0};
   aa_float snapshot[4];
@@ -742,6 +918,20 @@ static const char *all_tests(void) {
   mu_run_test(test_mem_capped_to_dim);
   printf("unit: dim=1 works\n");
   mu_run_test(test_dim_one);
+  printf("unit: min_len=1 starts extrapolating from iter 1\n");
+  mu_run_test(test_min_len_one_accelerates_early);
+  printf("unit: min_len=mem/2 converges\n");
+  mu_run_test(test_min_len_half_mem);
+  printf("unit: min_len=mem (default) converges\n");
+  mu_run_test(test_min_len_equal_mem_matches_default);
+  printf("unit: min_len=0 with mem>0 is rejected\n");
+  mu_run_test(test_min_len_zero_rejected);
+  printf("unit: min_len is ignored when mem=0\n");
+  mu_run_test(test_min_len_ignored_when_mem_zero);
+  printf("unit: min_len > mem is clamped silently\n");
+  mu_run_test(test_min_len_exceeding_mem_is_clamped);
+  printf("unit: min_len=1 survives safeguard-reject churn\n");
+  mu_run_test(test_min_len_survives_safeguard_churn);
   printf("unit: first aa_apply is a no-op on f\n");
   mu_run_test(test_first_iter_is_noop_on_f);
   printf("unit: aa_reset matches a fresh aa_init\n");

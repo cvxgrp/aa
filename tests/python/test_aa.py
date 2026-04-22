@@ -290,6 +290,66 @@ def test_mem_capped_to_dim():
 
 
 # ---------------------------------------------------------------------------
+# min_len: gate before AA starts extrapolating.
+# ---------------------------------------------------------------------------
+
+
+def test_min_len_default_matches_wait_for_fill():
+    """Default min_len (None) should equal min(mem, dim) and converge."""
+    Q, q, x_star, step = _make_quadratic(DIM, seed=9)
+    rng = np.random.default_rng(11)
+    x0 = rng.standard_normal(DIM)
+    w = aa.AndersonAccelerator(DIM, MEM, type1=False, regularization=1e-12)
+    x = _run_gd(Q, q, x0, step, steps=200, accelerator=w)
+    assert np.linalg.norm(x - x_star) < 1e-6
+
+
+def test_min_len_one_starts_extrapolating_early():
+    """min_len=1 must accept at least one AA step before the memory fills."""
+    dim, mem = 10, 10
+    Q, q, x_star, step = _make_quadratic(dim, seed=12)
+    rng = np.random.default_rng(13)
+    x0 = rng.standard_normal(dim)
+    w = aa.AndersonAccelerator(dim, mem, min_len=1,
+                               type1=False, regularization=1e-12)
+    x = x0.copy()
+    x_prev = x.copy()
+    applies = 0
+    # Run only `mem` iters — the default (min_len=mem) would have zero applies.
+    for i in range(mem):
+        if i > 0:
+            if w.apply(x, x_prev) > 0:
+                applies += 1
+        x_prev = x.copy()
+        x -= step * (Q @ x - q)
+        w.safeguard(x, x_prev)
+    assert applies > 0, "min_len=1 should accept AA steps before memory fills"
+
+
+def test_min_len_zero_rejected_when_mem_positive():
+    with pytest.raises(ValueError, match="min_len must be >= 1"):
+        aa.AndersonAccelerator(DIM, MEM, min_len=0)
+
+
+def test_min_len_clamped_when_exceeds_mem():
+    """min_len > mem should be silently clamped (mirrors mem > dim)."""
+    Q, q, x_star, step = _make_quadratic(DIM, seed=14)
+    rng = np.random.default_rng(15)
+    x0 = rng.standard_normal(DIM)
+    w = aa.AndersonAccelerator(DIM, MEM, min_len=10 * MEM,
+                               type1=False, regularization=1e-12)
+    x = _run_gd(Q, q, x0, step, steps=200, accelerator=w)
+    assert np.all(np.isfinite(x))
+    assert np.linalg.norm(x - x_star) < 1e-3
+
+
+def test_min_len_ignored_when_mem_zero():
+    """mem=0 (AA off) should accept any min_len without raising."""
+    w = aa.AndersonAccelerator(DIM, 0, min_len=999)
+    assert isinstance(w, aa.AndersonAccelerator)
+
+
+# ---------------------------------------------------------------------------
 # Many-workspace safety: aa_finish runs under __dealloc__.
 # ---------------------------------------------------------------------------
 

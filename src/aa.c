@@ -44,7 +44,6 @@
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#define FILL_MEMORY_BEFORE_SOLVE (1)
 
 #if PROFILING > 0
 
@@ -121,6 +120,7 @@ aa_float toc(const char *str, timer *t) {
 struct ACCEL_WORK {
   aa_int type1;        /* bool, if true type 1 aa otherwise type 2 */
   aa_int mem;          /* aa memory */
+  aa_int min_len;      /* min iterates before solve starts (1..mem) */
   aa_int dim;          /* variable dimension */
   aa_int iter;         /* current iteration */
   aa_int verbosity;    /* verbosity level, 0 is no printing */
@@ -566,19 +566,26 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
 /*
  * API functions below this line, see aa.h for descriptions.
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_float safeguard_factor,
-                aa_float max_weight_norm, aa_int ir_max_steps,
-                aa_int verbosity) {
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
+                aa_float regularization, aa_float relaxation,
+                aa_float safeguard_factor, aa_float max_weight_norm,
+                aa_int ir_max_steps, aa_int verbosity) {
   TIME_TIC
   AaWork *a;
+  aa_int mem_clamped = MIN(mem, dim);
   /* `regularization` is accepted with either sign: positive = scaled by
    * ||A||_F ||Y||_F; negative = pinned absolute |regularization|; zero = off.
-   * Only NaN / non-finite values are rejected (via the !isfinite check). */
+   * Only NaN / non-finite values are rejected (via the !isfinite check).
+   * min_len < 1 is rejected when mem > 0; min_len > mem_clamped is
+   * silently clamped down — same treatment the `mem` argument already
+   * gets against `dim`, so callers can pass `min_len = mem` without
+   * caring whether mem exceeded dim. When mem == 0 (AA off), min_len
+   * is ignored entirely. */
   if (dim <= 0 || mem < 0 || !isfinite(regularization) ||
       relaxation < 0 || relaxation > 2 ||
       safeguard_factor < 0 || max_weight_norm <= 0 ||
-      ir_max_steps < 0) {
+      ir_max_steps < 0 ||
+      (mem_clamped > 0 && min_len < 1)) {
     printf("Invalid AA parameters.\n");
     return (AaWork *)0;
   }
@@ -590,11 +597,12 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
   a->type1 = type1;
   a->iter = 0;
   a->dim = dim;
-  a->mem = MIN(mem, dim); /* for rank stability */
+  a->mem = mem_clamped; /* clamped to dim for rank stability */
   if (mem > dim && verbosity > 0) {
     printf("AA: mem (%d) > dim (%d); clamping mem to dim.\n",
            (int)mem, (int)dim);
   }
+  a->min_len = mem_clamped > 0 ? MIN(min_len, mem_clamped) : 0;
   a->regularization = regularization;
   a->relaxation = relaxation;
   a->safeguard_factor = safeguard_factor;
@@ -737,8 +745,8 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   /* set various accel quantities */
   update_accel_params(x, f, a, len);
 
-  /* only perform solve steps when the memory is full */
-  if (!FILL_MEMORY_BEFORE_SOLVE || a->iter >= a->mem) {
+  /* Hold off the solve until we have min_len residual pairs buffered. */
+  if (a->iter >= a->min_len) {
     /* solve linear system, new point overwrites f if successful */
     aa_norm = solve(f, a, len);
   }
