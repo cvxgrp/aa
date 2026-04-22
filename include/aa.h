@@ -23,6 +23,18 @@ typedef struct ACCEL_WORK AaWork;
  *
  * @param dim               the dimension of the variable for AA
  * @param mem               the memory (number of past iterations used) for AA
+ * @param min_len           minimum number of past iterates required before AA
+ *                          begins producing updates. Must be >= 1 when
+ *                          mem > 0; if min_len exceeds the effective
+ *                          memory (min(mem, dim)) it is clamped down,
+ *                          mirroring how `mem` is clamped to `dim` for
+ *                          rank stability. Set min_len == mem to delay
+ *                          AA until the memory is full (stable default
+ *                          for large `mem`); set min_len == 1 to start
+ *                          extrapolating from the very first residual
+ *                          pair (useful when `mem` is large but you
+ *                          still want early acceleration). Ignored when
+ *                          mem == 0.
  * @param type1             if True use type 1 AA, otherwise use type 2
  * @param regularization    Tikhonov regularization for the AA least-squares
  *                          system. Three modes, selected by sign:
@@ -50,10 +62,10 @@ typedef struct ACCEL_WORK AaWork;
  * @return pointer to AA workspace
  *
  */
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1, aa_float regularization,
-                aa_float relaxation, aa_float safeguard_factor,
-                aa_float max_weight_norm, aa_int ir_max_steps,
-                aa_int verbosity);
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
+                aa_float regularization, aa_float relaxation,
+                aa_float safeguard_factor, aa_float max_weight_norm,
+                aa_int ir_max_steps, aa_int verbosity);
 
 /**
  * Apply Anderson Acceleration. The usage pattern should be as follows:

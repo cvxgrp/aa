@@ -119,6 +119,7 @@ examples requires installing `matplotlib` (`pip install matplotlib`).
 
 AaWork *a = aa_init(n,     /* dim              */
                     10,    /* mem              */
+                    10,    /* min_len          */
                     1,     /* type1            */
                     1e-8,  /* regularization   */
                     1.0,   /* relaxation       */
@@ -146,6 +147,7 @@ See [`tests/c/gd.c`](tests/c/gd.c) for a complete runnable example
 |--------------------|---------------------------------------------------------------------------------------------------|-----------------------------------------|
 | `dim`              | Problem dimension                                                                                 | your variable size                      |
 | `mem`              | Number of past iterates to look back                                                              | 5 – 20                                  |
+| `min_len`          | Minimum buffered residual pairs before AA begins extrapolating. `min_len = mem` waits for the memory to fill (stable default); `min_len = 1` starts extrapolating immediately. Must be ≥ 1 when `mem > 0`; clamped down when it exceeds `min(mem, dim)`. | `mem`                                   |
 | `type1`            | Type-I if true, Type-II otherwise                                                                 | see notes below                         |
 | `regularization`   | Tikhonov regularization on the AA least-squares system. `> 0`: scaled by `‖A‖_F·‖Y‖_F`. `< 0`: pinned absolute `-regularization` (no scaling). `= 0`: off. | Type-I: `1e-8`, Type-II: `1e-12`        |
 | `relaxation`       | Mixing parameter in `[0, 2]`; `1.0` is vanilla AA                                                 | `1.0`                                   |
@@ -166,6 +168,7 @@ aa.AndersonAccelerator(
     dim,
     mem,
     *,
+    min_len=None,          # defaults to min(mem, dim)
     type1=False,
     regularization=1e-12,
     relaxation=1.0,
@@ -191,7 +194,7 @@ See [`include/aa.h`](include/aa.h) for the full interface, which mirrors the
 Python API exactly:
 
 ```c
-AaWork *aa_init(aa_int dim, aa_int mem, aa_int type1,
+AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
                 aa_float regularization, aa_float relaxation,
                 aa_float safeguard_factor, aa_float max_weight_norm,
                 aa_int ir_max_steps, aa_int verbosity);

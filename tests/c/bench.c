@@ -132,8 +132,9 @@ static void run_one(bench_cfg cfg) {
   }
   aa_float step = 1.0; /* = 1 / max(Qdiag) */
 
-  AaWork *a = aa_init(n, cfg.mem, cfg.type1, cfg.regularization,
-                      cfg.relaxation, /*safeguard_factor=*/2.0,
+  AaWork *a = aa_init(n, cfg.mem, /*min_len=*/cfg.mem, cfg.type1,
+                      cfg.regularization, cfg.relaxation,
+                      /*safeguard_factor=*/2.0,
                       /*max_weight_norm=*/1e10, /*ir_max_steps=*/5,
                       /*verbosity=*/0);
   if (!a) {
@@ -213,7 +214,7 @@ int main(void) {
     aa_float *x = (aa_float *)malloc(sizeof(aa_float) * wd);
     aa_float *xprev = (aa_float *)malloc(sizeof(aa_float) * wd);
     for (aa_int i = 0; i < wd; i++) { x[i] = 1.0; xprev[i] = 0.0; }
-    AaWork *a = aa_init(wd, wm, 0, 1e-12, 1.0, 2.0, 1e10, 5, 0);
+    AaWork *a = aa_init(wd, wm, /*min_len=*/wm, 0, 1e-12, 1.0, 2.0, 1e10, 5, 0);
     for (aa_int i = 0; i < wi; i++) {
       if (i > 0) aa_apply(x, xprev, a);
       memcpy(xprev, x, sizeof(aa_float) * wd);
