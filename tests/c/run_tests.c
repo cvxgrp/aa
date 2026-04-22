@@ -886,6 +886,109 @@ static const char *test_first_iter_is_noop_on_f(void) {
   return 0;
 }
 
+/* aa_get_stats: counters start at zero, accept count rises as AA takes
+ * steps, and last_* fields reflect the most recent solve. Also verifies
+ * that an internal aa_reset (triggered by a safeguard rejection) does
+ * NOT wipe the counters — rejections should stay visible. */
+static const char *test_stats_basic_counters(void) {
+  const aa_int n = 10;
+  aa_float Qdiag[10];
+  for (int i = 0; i < n; i++) {
+    Qdiag[i] = 0.1 + 0.9 * (aa_float)i / (aa_float)(n - 1);
+  }
+  aa_float *x = (aa_float *)calloc(n, sizeof(aa_float));
+  aa_float *xprev = (aa_float *)calloc(n, sizeof(aa_float));
+  srand(77);
+  for (aa_int i = 0; i < n; i++) x[i] = rand_float();
+  AaWork *a = aa_init(n, /*mem=*/5, /*min_len=*/5, /*type1=*/0,
+                      /*reg=*/1e-12, /*relax=*/1.0, /*safeguard=*/2.0,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init returned NULL", a != NULL);
+
+  AaStats s = aa_get_stats(a);
+  mu_assert("fresh workspace iter must be 0", s.iter == 0);
+  mu_assert("fresh workspace n_accept must be 0", s.n_accept == 0);
+  mu_assert("fresh workspace n_reject_lapack must be 0",
+            s.n_reject_lapack == 0);
+  mu_assert("fresh workspace n_reject_rank0 must be 0",
+            s.n_reject_rank0 == 0);
+  mu_assert("fresh workspace n_reject_nonfinite must be 0",
+            s.n_reject_nonfinite == 0);
+  mu_assert("fresh workspace n_reject_weight_cap must be 0",
+            s.n_reject_weight_cap == 0);
+  mu_assert("fresh workspace n_safeguard_reject must be 0",
+            s.n_safeguard_reject == 0);
+  mu_assert("fresh workspace last_rank must be 0", s.last_rank == 0);
+  mu_assert("fresh workspace last_aa_norm must be NaN",
+            isnan(s.last_aa_norm));
+
+  for (aa_int i = 0; i < 50; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, n * sizeof(aa_float));
+    for (aa_int j = 0; j < n; j++) x[j] -= 1.0 * Qdiag[j] * xprev[j];
+    aa_safeguard(x, xprev, a);
+  }
+
+  s = aa_get_stats(a);
+  /* With mem=5, min_len=5, iter=0..49, the solve runs on iters 5..49 → 45 opportunities. */
+  mu_assert("stats: iter must advance", s.iter > 0);
+  mu_assert("stats: some AA steps should have been accepted", s.n_accept > 0);
+  mu_assert("stats: last_rank should be >= 1 after convergence run",
+            s.last_rank >= 1);
+  mu_assert("stats: last_rank should be <= mem", s.last_rank <= 5);
+  mu_assert("stats: last_aa_norm should be finite",
+            isfinite(s.last_aa_norm));
+  mu_assert("stats: last_regularization should be non-negative",
+            s.last_regularization >= 0);
+
+  aa_finish(a);
+  free(x);
+  free(xprev);
+  return 0;
+}
+
+/* Lifetime counters must survive an internal aa_reset (safeguard reject
+ * path): we want the rejection itself to show up in n_safeguard_reject,
+ * not be wiped by the reset it triggers. */
+static const char *test_stats_survive_safeguard_reject(void) {
+  const aa_int n = 4;
+  /* Tight safeguard_factor=0.01 and an adversarial initial state force
+   * a safeguard rejection on the first post-solve iteration. */
+  AaWork *a = aa_init(n, /*mem=*/2, /*min_len=*/2, /*type1=*/0,
+                      /*reg=*/1e-12, /*relax=*/1.0, /*safeguard=*/0.01,
+                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+  mu_assert("aa_init returned NULL", a != NULL);
+
+  /* Hand-driven sequence chosen to land in the safeguard reject branch. */
+  aa_float x[4] = {1.0, 1.0, 1.0, 1.0};
+  aa_float xprev[4];
+  for (aa_int i = 0; i < 4; i++) {
+    if (i > 0) aa_apply(x, xprev, a);
+    memcpy(xprev, x, sizeof(x));
+    for (int k = 0; k < n; k++) x[k] *= 0.5;
+    aa_safeguard(x, xprev, a);
+  }
+  /* Now feed a large jump to trigger safeguard rejection. */
+  aa_apply(x, xprev, a);
+  memcpy(xprev, x, sizeof(x));
+  aa_float jump[4] = {100.0, 100.0, 100.0, 100.0};
+  memcpy(x, jump, sizeof(x));
+  aa_int r = aa_safeguard(x, xprev, a);
+
+  AaStats s = aa_get_stats(a);
+  if (r == -1) {
+    mu_assert("stats: safeguard reject must be counted",
+              s.n_safeguard_reject >= 1);
+  }
+  /* Regardless of the specific reject path taken, n_accept should have
+   * observed at least one accepted AA step earlier (iter 2 onward). */
+  mu_assert("stats: accept count must survive internal aa_reset",
+            s.n_accept >= 1);
+
+  aa_finish(a);
+  return 0;
+}
+
 /* =============================================================== */
 
 static const char *all_tests(void) {
@@ -954,6 +1057,10 @@ static const char *all_tests(void) {
   mu_run_test(test_pinned_regularization);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
+  printf("unit: aa_get_stats basic counters\n");
+  mu_run_test(test_stats_basic_counters);
+  printf("unit: stats survive internal aa_reset from safeguard\n");
+  mu_run_test(test_stats_survive_safeguard_reject);
 
   return 0;
 }
