@@ -348,12 +348,14 @@ static void relax(aa_float *f, AaWork *a, aa_int len) {
 /* Solve the regularized normal equations (A'B + rI) γ = A'g via a
  * pivoted QR (geqp3) of the augmented matrix [A; √r I]. Column pivoting
  * exposes the numerical rank directly in the diagonal of R: we truncate
- * at the first diagonal whose magnitude falls below aug_rows·ε·|R_11|
- * and solve the smaller, well-conditioned system (graceful degradation
- * instead of hard reset on near-rank-deficiency). Iterative refinement
- * on the reduced system recovers digits lost to gesv/trsv rounding; the
- * loop auto-stops when the correction no longer contracts and is capped
- * at ir_max_steps (see aa_init). γ is then validated against
+ * at the first diagonal whose magnitude falls below len·ε·|R_11|
+ * (dim-independent: the inner LS is a len-column problem, so its noise
+ * floor scales with column count, not the caller's state dim) and solve
+ * the smaller, well-conditioned system (graceful degradation instead of
+ * hard reset on near-rank-deficiency). Iterative refinement on the
+ * reduced system recovers digits lost to gesv/trsv rounding; the loop
+ * auto-stops when the correction no longer contracts and is capped at
+ * ir_max_steps (see aa_init). γ is then validated against
  * max_weight_norm in the L2 sense. */
 static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   TIME_TIC
@@ -400,7 +402,12 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   if (info == 0) {
     aa_float r11 = fabs(a->A_aug[0]);
     if (r11 > 0) {
-      aa_float tol = r11 * (aa_float)aug_rows * AA_EPS;
+      /* Column-count-based rank tolerance: the effective LS problem has
+       * `len` columns, so the rounding floor for rank determination
+       * scales with `len`, not (dim + mem). Decoupling from `dim` avoids
+       * falsely dropping columns that are healthy relative to the
+       * regularizer at large state dimensions. */
+      aa_float tol = r11 * (aa_float)len * AA_EPS;
       for (rank = 0; rank < len; ++rank) {
         if (fabs(a->A_aug[rank * aug_rows + rank]) < tol) break;
       }
