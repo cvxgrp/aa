@@ -8,11 +8,19 @@ cdef extern from "../src/aa.c":
 cdef extern from "../include/aa.h":
     ctypedef struct AaWork:
         pass
+    ctypedef struct AaStats:
+        int n_accept
+        int n_apply_reject
+        int n_safeguard_reject
+        int last_rank
+        double last_aa_norm
+        double last_regularization
     AaWork *aa_init(int, int, int, int, double, double, double, double, int, int)
     double aa_apply(double*, const double*, AaWork*)
     int aa_safeguard(double*, double*, AaWork*)
     void aa_reset(AaWork*)
     void aa_finish(AaWork *)
+    void aa_get_stats(const AaWork*, AaStats*)
 
 cdef class AndersonAccelerator(object):
     cdef AaWork* _wrk
@@ -89,6 +97,29 @@ cdef class AndersonAccelerator(object):
 
     def reset(self):
         aa_reset(self._wrk)
+
+    @property
+    def stats(self):
+        """Lifetime diagnostic counters. Not cleared by reset().
+
+        Returns a dict with:
+          n_accept             : # of AA steps accepted by apply()
+          n_apply_reject       : # of solves rejected (weight-norm / rank=0 / lapack info)
+          n_safeguard_reject   : # of safeguard rollbacks
+          last_rank            : numerical rank of most recent LS solve
+          last_aa_norm         : ||γ||₂ of most recent solve (0 if none yet)
+          last_regularization  : r used in most recent solve (0 if none yet)
+        """
+        cdef AaStats s
+        aa_get_stats(self._wrk, &s)
+        return {
+            "n_accept": int(s.n_accept),
+            "n_apply_reject": int(s.n_apply_reject),
+            "n_safeguard_reject": int(s.n_safeguard_reject),
+            "last_rank": int(s.last_rank),
+            "last_aa_norm": float(s.last_aa_norm),
+            "last_regularization": float(s.last_regularization),
+        }
 
     def __dealloc__(self):
         aa_finish(self._wrk)

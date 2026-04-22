@@ -186,7 +186,8 @@ C-contiguous, writeable `float64` numpy arrays of length `dim`.
 |-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `apply(f, x)`           | Call once per iteration (skip the first). `f` holds the most recent map output `F(x)`. Overwrites `f` in place with the AA-extrapolated point.    |
 | `safeguard(f_new, x_new)` | Call after running your map on the AA extrapolate. If AA did not make progress, reverts both arrays to the last-known-good state. Returns `0` on accept, `-1` on reject. |
-| `reset()`               | Clears AA state (equivalent to re-initializing) without reallocating.                                                                             |
+| `reset()`               | Clears AA state (equivalent to re-initializing) without reallocating. Lifetime `stats` counters are NOT cleared.                                 |
+| `stats`                 | Read-only property returning a dict of lifetime counters: `n_accept`, `n_apply_reject`, `n_safeguard_reject`, `last_rank`, `last_aa_norm`, `last_regularization`. Useful for diagnosing when AA isn't helping — a high `n_apply_reject` points at `max_weight_norm` / `regularization` tuning; a high `n_safeguard_reject` points at `safeguard_factor` / `mem`. |
 
 ## C API
 
@@ -203,6 +204,7 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a);
 aa_int   aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a);
 void     aa_reset(AaWork *a);
 void     aa_finish(AaWork *a);
+void     aa_get_stats(const AaWork *a, AaStats *out);
 ```
 
 `aa_apply` returns the (signed) norm of the AA weight vector: positive means

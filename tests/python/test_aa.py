@@ -350,6 +350,52 @@ def test_min_len_ignored_when_mem_zero():
 
 
 # ---------------------------------------------------------------------------
+# stats: lifetime diagnostic counters.
+# ---------------------------------------------------------------------------
+
+
+def test_stats_start_at_zero():
+    w = aa.AndersonAccelerator(DIM, MEM)
+    s = w.stats
+    assert s["n_accept"] == 0
+    assert s["n_apply_reject"] == 0
+    assert s["n_safeguard_reject"] == 0
+    assert s["last_rank"] == 0
+    assert s["last_aa_norm"] == 0.0
+    assert s["last_regularization"] == 0.0
+
+
+def test_stats_accept_counter_increments():
+    """After a short GD+AA run n_accept is > 0 and last_rank sits in [1, mem].
+    Short horizon intentional: past machine-precision convergence `A` is
+    numerically zero so rank-reveal correctly returns 0."""
+    Q, q, _, step = _make_quadratic(DIM, seed=17)
+    rng = np.random.default_rng(19)
+    x0 = rng.standard_normal(DIM)
+    w = aa.AndersonAccelerator(DIM, MEM, type1=False, regularization=1e-12)
+    _run_gd(Q, q, x0, step, steps=20, accelerator=w)
+    s = w.stats
+    assert s["n_accept"] > 0
+    assert 1 <= s["last_rank"] <= MEM
+    assert np.isfinite(s["last_aa_norm"])
+    assert s["last_regularization"] >= 0
+
+
+def test_stats_survive_reset_call():
+    """Explicit reset() does NOT clear lifetime counters (matches C contract)."""
+    Q, q, _, step = _make_quadratic(DIM, seed=21)
+    rng = np.random.default_rng(22)
+    x0 = rng.standard_normal(DIM)
+    w = aa.AndersonAccelerator(DIM, MEM, type1=False, regularization=1e-12)
+    _run_gd(Q, q, x0, step, steps=50, accelerator=w)
+    before = w.stats["n_accept"]
+    assert before > 0
+    w.reset()
+    after = w.stats["n_accept"]
+    assert after == before, "reset() must not clear lifetime counters"
+
+
+# ---------------------------------------------------------------------------
 # Many-workspace safety: aa_finish runs under __dealloc__.
 # ---------------------------------------------------------------------------
 

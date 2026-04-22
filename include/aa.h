@@ -120,11 +120,48 @@ void aa_finish(AaWork *a);
  * Reset Anderson Acceleration.
  *
  * Resets AA as if at the first iteration, reuses original memory allocations.
+ * Does not clear lifetime diagnostic counters; use aa_get_stats after reset
+ * to read them, or just re-init the workspace for a clean slate.
  *
  * @param a   AA workspace from aa_init, or NULL (no-op).
  *
  */
 void aa_reset(AaWork *a);
+
+/**
+ * Lifetime diagnostics for an AaWork. All counters accumulate from
+ * aa_init and are NOT cleared by aa_reset (which is also called
+ * internally when a safeguard rejection forces a fresh state, and
+ * you still want the rejection itself to show up in the counts).
+ *
+ * `last_*` fields reflect the most recent AA least-squares solve
+ * (successful or not). They are zero when no solve has run yet — e.g.
+ * the first few iterations or when min_len has not been reached.
+ */
+typedef struct {
+  aa_int n_accept;            /* aa_apply steps that were accepted */
+  aa_int n_apply_reject;      /* aa_apply solves rejected (weight-norm / rank=0 / lapack info) */
+  aa_int n_safeguard_reject;  /* aa_safeguard rollbacks */
+  aa_int last_rank;           /* numerical rank of most recent LS solve */
+  aa_float last_aa_norm;      /* ||γ||₂ of most recent solve (always non-negative) */
+  aa_float last_regularization; /* r value used in most recent solve */
+} AaStats;
+
+/**
+ * Read lifetime diagnostic counters.
+ *
+ * Fills `*out` with the current counters. Use for post-hoc
+ * diagnosis of why AA is or isn't accelerating a given fixed-point
+ * iteration — e.g. a high n_apply_reject suggests max_weight_norm or
+ * regularization needs tuning; a high n_safeguard_reject suggests
+ * safeguard_factor or mem needs tuning.
+ *
+ * No-op when either argument is NULL.
+ *
+ * @param a    AA workspace from aa_init, or NULL (no-op).
+ * @param out  destination struct, or NULL (no-op).
+ */
+void aa_get_stats(const AaWork *a, AaStats *out);
 
 #ifdef __cplusplus
 }

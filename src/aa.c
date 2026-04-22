@@ -184,6 +184,16 @@ struct ACCEL_WORK {
   aa_float *work;
 
   aa_float *x_work; /* workspace (= x) for when relaxation != 1.0 */
+
+  /* Lifetime diagnostics (see AaStats in aa.h). NOT cleared by
+   * aa_reset — the internal reset path fires on safeguard rejection,
+   * and you want the rejection to stay visible in the counters. */
+  aa_int n_accept;
+  aa_int n_apply_reject;
+  aa_int n_safeguard_reject;
+  aa_int last_rank;
+  aa_float last_aa_norm;
+  aa_float last_regularization;
 };
 
 /* Reduce a length-`mem` vector of nonnegative column norms to a single
@@ -529,6 +539,11 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   /* 5. Validate γ via ‖γ‖₂ against max_weight_norm. */
   aa_norm = (info == 0) ? BLAS(nrm2)(&blen, gamma, &one) : -1.0;
 
+  /* Record diagnostics for this solve, regardless of accept/reject. */
+  a->last_rank = rank;
+  a->last_regularization = r;
+  a->last_aa_norm = (info == 0 && isfinite(aa_norm)) ? aa_norm : 0.0;
+
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, rank %i, info: %i, aa_norm %.2e\n",
            a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)rank, (int)info,
@@ -749,6 +764,11 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
   if (a->iter >= a->min_len) {
     /* solve linear system, new point overwrites f if successful */
     aa_norm = solve(f, a, len);
+    if (aa_norm > 0) {
+      a->n_accept++;
+    } else if (aa_norm < 0) {
+      a->n_apply_reject++;
+    }
   }
   a->iter++;
   TIME_TOC
@@ -793,6 +813,7 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
       printf("AA rejection, iter: %i, norm_diff %.4e, prev_norm_diff %.4e\n",
              (int)a->iter, norm_diff, a->norm_g);
     }
+    a->n_safeguard_reject++;
     aa_reset(a);
     TIME_TOC
     return -1;
@@ -862,4 +883,16 @@ void aa_reset(AaWork *a) {
   if (a->nrm_y_col) {
     memset(a->nrm_y_col, 0, sizeof(aa_float) * a->mem);
   }
+}
+
+void aa_get_stats(const AaWork *a, AaStats *out) {
+  if (!a || !out) {
+    return;
+  }
+  out->n_accept = a->n_accept;
+  out->n_apply_reject = a->n_apply_reject;
+  out->n_safeguard_reject = a->n_safeguard_reject;
+  out->last_rank = a->last_rank;
+  out->last_aa_norm = a->last_aa_norm;
+  out->last_regularization = a->last_regularization;
 }
