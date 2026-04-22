@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # Keep these in sync with setup.py, which duplicates them for legacy
 # setuptools/editable-install code paths.
 name = "anderson-acceleration"
-version = "0.0.2"
+version = "0.0.3"
 description = "Anderson acceleration for fixed-point iterations"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
