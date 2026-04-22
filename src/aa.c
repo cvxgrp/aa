@@ -189,7 +189,10 @@ struct ACCEL_WORK {
    * aa_reset — the internal reset path fires on safeguard rejection,
    * and you want the rejection to stay visible in the counters. */
   aa_int n_accept;
-  aa_int n_apply_reject;
+  aa_int n_reject_lapack;
+  aa_int n_reject_rank0;
+  aa_int n_reject_nonfinite;
+  aa_int n_reject_weight_cap;
   aa_int n_safeguard_reject;
   aa_int last_rank;
   aa_float last_aa_norm;
@@ -405,6 +408,10 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   for (i = 0; i < len; ++i) a->jpvt[i] = 0;
   BLAS(geqp3)(&aug_rows, &blen, a->A_aug, &aug_rows, a->jpvt, a->tau,
               a->qr_work, &a->qr_lwork, &info);
+  /* Capture geqp3's info before the rank-0 path below overwrites it; the
+   * reject-cause attribution needs to distinguish a genuine LAPACK failure
+   * from "the matrix went numerically to zero." */
+  blas_int lapack_info = info;
 
   /* 2. Rank estimation. geqp3 sorts |R_ii| non-increasingly; find the
    *    largest `rank` with |R_rank-1,rank-1| ≥ tol. A rank of zero means
@@ -539,10 +546,13 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
   /* 5. Validate γ via ‖γ‖₂ against max_weight_norm. */
   aa_norm = (info == 0) ? BLAS(nrm2)(&blen, gamma, &one) : -1.0;
 
-  /* Record diagnostics for this solve, regardless of accept/reject. */
+  /* Record diagnostics for this solve, regardless of accept/reject.
+   * NaN last_aa_norm signals "no valid norm this solve" — distinguishing
+   * the genuine-zero case (rank collapse gives aa_norm = 0 legitimately)
+   * from a failed/rejected solve. */
   a->last_rank = rank;
   a->last_regularization = r;
-  a->last_aa_norm = (info == 0 && isfinite(aa_norm)) ? aa_norm : 0.0;
+  a->last_aa_norm = (info == 0 && isfinite(aa_norm)) ? aa_norm : NAN;
 
   if (a->verbosity > 1) {
     printf("AA type %i, iter: %i, len %i, rank %i, info: %i, aa_norm %.2e\n",
@@ -556,6 +566,20 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
              "aa_norm %.2e\n",
              a->type1 ? 1 : 2, (int)a->iter, (int)len, (int)rank, (int)info,
              aa_norm);
+    }
+    /* Attribute the rejection to exactly one cause, in priority order.
+     * lapack_info is the original geqp3 return; the rank-0 path above may
+     * have set info=1 but that is the bookkeeping trick, not a LAPACK
+     * failure. Without this ordering, rank-0 would be miscounted as
+     * "lapack" via info. */
+    if (lapack_info != 0) {
+      a->n_reject_lapack++;
+    } else if (rank == 0) {
+      a->n_reject_rank0++;
+    } else if (!isfinite(aa_norm)) {
+      a->n_reject_nonfinite++;
+    } else {
+      a->n_reject_weight_cap++;
     }
     a->success = 0;
     aa_reset(a);
@@ -625,6 +649,11 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
   a->ir_max_steps = ir_max_steps;
   a->success = 0;
   a->verbosity = verbosity;
+  /* Counters are already zero from calloc; only last_aa_norm needs an
+   * explicit sentinel so callers can distinguish "never solved" from a
+   * legitimate zero norm (which never happens on a successful solve, but
+   * 0 is a bad signal either way). */
+  a->last_aa_norm = NAN;
   if (a->mem <= 0) {
     return a;
   }
@@ -762,12 +791,12 @@ aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a) {
 
   /* Hold off the solve until we have min_len residual pairs buffered. */
   if (a->iter >= a->min_len) {
-    /* solve linear system, new point overwrites f if successful */
+    /* solve linear system, new point overwrites f if successful.
+     * Rejection causes are counted inside solve() where the specific
+     * failure mode is known; here we only count acceptances. */
     aa_norm = solve(f, a, len);
     if (aa_norm > 0) {
       a->n_accept++;
-    } else if (aa_norm < 0) {
-      a->n_apply_reject++;
     }
   }
   a->iter++;
@@ -885,14 +914,17 @@ void aa_reset(AaWork *a) {
   }
 }
 
-void aa_get_stats(const AaWork *a, AaStats *out) {
-  if (!a || !out) {
-    return;
-  }
-  out->n_accept = a->n_accept;
-  out->n_apply_reject = a->n_apply_reject;
-  out->n_safeguard_reject = a->n_safeguard_reject;
-  out->last_rank = a->last_rank;
-  out->last_aa_norm = a->last_aa_norm;
-  out->last_regularization = a->last_regularization;
+AaStats aa_get_stats(const AaWork *a) {
+  AaStats s;
+  s.iter = a->iter;
+  s.n_accept = a->n_accept;
+  s.n_reject_lapack = a->n_reject_lapack;
+  s.n_reject_rank0 = a->n_reject_rank0;
+  s.n_reject_nonfinite = a->n_reject_nonfinite;
+  s.n_reject_weight_cap = a->n_reject_weight_cap;
+  s.n_safeguard_reject = a->n_safeguard_reject;
+  s.last_rank = a->last_rank;
+  s.last_aa_norm = a->last_aa_norm;
+  s.last_regularization = a->last_regularization;
+  return s;
 }

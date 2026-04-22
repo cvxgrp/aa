@@ -9,8 +9,12 @@ cdef extern from "../include/aa.h":
     ctypedef struct AaWork:
         pass
     ctypedef struct AaStats:
+        int iter
         int n_accept
-        int n_apply_reject
+        int n_reject_lapack
+        int n_reject_rank0
+        int n_reject_nonfinite
+        int n_reject_weight_cap
         int n_safeguard_reject
         int last_rank
         double last_aa_norm
@@ -20,7 +24,7 @@ cdef extern from "../include/aa.h":
     int aa_safeguard(double*, double*, AaWork*)
     void aa_reset(AaWork*)
     void aa_finish(AaWork *)
-    void aa_get_stats(const AaWork*, AaStats*)
+    AaStats aa_get_stats(const AaWork*)
 
 cdef class AndersonAccelerator(object):
     cdef AaWork* _wrk
@@ -103,18 +107,26 @@ cdef class AndersonAccelerator(object):
         """Lifetime diagnostic counters. Not cleared by reset().
 
         Returns a dict with:
+          iter                 : internal iteration counter
           n_accept             : # of AA steps accepted by apply()
-          n_apply_reject       : # of solves rejected (weight-norm / rank=0 / lapack info)
+          n_reject_lapack      : # of solves rejected due to LAPACK geqp3 failure
+          n_reject_rank0       : # of solves where pivoted QR truncated to rank 0
+          n_reject_nonfinite   : # of solves with non-finite ||γ||₂
+          n_reject_weight_cap  : # of solves with ||γ||₂ >= max_weight_norm
           n_safeguard_reject   : # of safeguard rollbacks
           last_rank            : numerical rank of most recent LS solve
-          last_aa_norm         : ||γ||₂ of most recent solve (0 if none yet)
+          last_aa_norm         : ||γ||₂ of most recent solve (NaN if none yet
+                                 or solve failed)
           last_regularization  : r used in most recent solve (0 if none yet)
         """
-        cdef AaStats s
-        aa_get_stats(self._wrk, &s)
+        cdef AaStats s = aa_get_stats(self._wrk)
         return {
+            "iter": int(s.iter),
             "n_accept": int(s.n_accept),
-            "n_apply_reject": int(s.n_apply_reject),
+            "n_reject_lapack": int(s.n_reject_lapack),
+            "n_reject_rank0": int(s.n_reject_rank0),
+            "n_reject_nonfinite": int(s.n_reject_nonfinite),
+            "n_reject_weight_cap": int(s.n_reject_weight_cap),
             "n_safeguard_reject": int(s.n_safeguard_reject),
             "last_rank": int(s.last_rank),
             "last_aa_norm": float(s.last_aa_norm),

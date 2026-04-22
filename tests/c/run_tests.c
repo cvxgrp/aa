@@ -905,14 +905,22 @@ static const char *test_stats_basic_counters(void) {
                       /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init returned NULL", a != NULL);
 
-  AaStats s;
-  aa_get_stats(a, &s);
+  AaStats s = aa_get_stats(a);
+  mu_assert("fresh workspace iter must be 0", s.iter == 0);
   mu_assert("fresh workspace n_accept must be 0", s.n_accept == 0);
-  mu_assert("fresh workspace n_apply_reject must be 0", s.n_apply_reject == 0);
+  mu_assert("fresh workspace n_reject_lapack must be 0",
+            s.n_reject_lapack == 0);
+  mu_assert("fresh workspace n_reject_rank0 must be 0",
+            s.n_reject_rank0 == 0);
+  mu_assert("fresh workspace n_reject_nonfinite must be 0",
+            s.n_reject_nonfinite == 0);
+  mu_assert("fresh workspace n_reject_weight_cap must be 0",
+            s.n_reject_weight_cap == 0);
   mu_assert("fresh workspace n_safeguard_reject must be 0",
             s.n_safeguard_reject == 0);
   mu_assert("fresh workspace last_rank must be 0", s.last_rank == 0);
-  mu_assert("fresh workspace last_aa_norm must be 0", s.last_aa_norm == 0);
+  mu_assert("fresh workspace last_aa_norm must be NaN",
+            isnan(s.last_aa_norm));
 
   for (aa_int i = 0; i < 50; i++) {
     if (i > 0) aa_apply(x, xprev, a);
@@ -921,8 +929,9 @@ static const char *test_stats_basic_counters(void) {
     aa_safeguard(x, xprev, a);
   }
 
-  aa_get_stats(a, &s);
+  s = aa_get_stats(a);
   /* With mem=5, min_len=5, iter=0..49, the solve runs on iters 5..49 → 45 opportunities. */
+  mu_assert("stats: iter must advance", s.iter > 0);
   mu_assert("stats: some AA steps should have been accepted", s.n_accept > 0);
   mu_assert("stats: last_rank should be >= 1 after convergence run",
             s.last_rank >= 1);
@@ -966,8 +975,7 @@ static const char *test_stats_survive_safeguard_reject(void) {
   memcpy(x, jump, sizeof(x));
   aa_int r = aa_safeguard(x, xprev, a);
 
-  AaStats s;
-  aa_get_stats(a, &s);
+  AaStats s = aa_get_stats(a);
   if (r == -1) {
     mu_assert("stats: safeguard reject must be counted",
               s.n_safeguard_reject >= 1);
@@ -977,16 +985,6 @@ static const char *test_stats_survive_safeguard_reject(void) {
   mu_assert("stats: accept count must survive internal aa_reset",
             s.n_accept >= 1);
 
-  aa_finish(a);
-  return 0;
-}
-
-/* aa_get_stats must tolerate NULL arguments (both struct and workspace). */
-static const char *test_stats_null_safe(void) {
-  AaStats s = {0};
-  aa_get_stats(NULL, &s);       /* no-op */
-  AaWork *a = aa_init(4, 2, 2, 0, 1e-12, 1.0, 2.0, 1e10, 5, 0);
-  aa_get_stats(a, NULL);        /* no-op */
   aa_finish(a);
   return 0;
 }
@@ -1063,8 +1061,6 @@ static const char *all_tests(void) {
   mu_run_test(test_stats_basic_counters);
   printf("unit: stats survive internal aa_reset from safeguard\n");
   mu_run_test(test_stats_survive_safeguard_reject);
-  printf("unit: aa_get_stats NULL-safe\n");
-  mu_run_test(test_stats_null_safe);
 
   return 0;
 }

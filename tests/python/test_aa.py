@@ -357,11 +357,17 @@ def test_min_len_ignored_when_mem_zero():
 def test_stats_start_at_zero():
     w = aa.AndersonAccelerator(DIM, MEM)
     s = w.stats
+    assert s["iter"] == 0
     assert s["n_accept"] == 0
-    assert s["n_apply_reject"] == 0
+    assert s["n_reject_lapack"] == 0
+    assert s["n_reject_rank0"] == 0
+    assert s["n_reject_nonfinite"] == 0
+    assert s["n_reject_weight_cap"] == 0
     assert s["n_safeguard_reject"] == 0
     assert s["last_rank"] == 0
-    assert s["last_aa_norm"] == 0.0
+    # NaN (not 0) is the sentinel for "no valid norm yet" — distinguishes
+    # a fresh workspace from a legitimate zero-norm solve.
+    assert np.isnan(s["last_aa_norm"])
     assert s["last_regularization"] == 0.0
 
 
@@ -375,6 +381,7 @@ def test_stats_accept_counter_increments():
     w = aa.AndersonAccelerator(DIM, MEM, type1=False, regularization=1e-12)
     _run_gd(Q, q, x0, step, steps=20, accelerator=w)
     s = w.stats
+    assert s["iter"] > 0
     assert s["n_accept"] > 0
     assert 1 <= s["last_rank"] <= MEM
     assert np.isfinite(s["last_aa_norm"])
