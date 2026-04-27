@@ -52,7 +52,7 @@ jobs:
 
       - uses: ilammy/msvc-dev-cmd@v1
 
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: conda-incubator/setup-miniconda@v4
         with:
           miniconda-version: latest
           auto-activate-base: true
