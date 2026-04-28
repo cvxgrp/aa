@@ -46,10 +46,10 @@ typedef struct ACCEL_WORK AaWork;
  *                                  problem scale is known).
  *                            = 0 : no regularization.
  *                          Only non-finite values (NaN/Inf) are rejected.
- * @param relaxation        float \in [0,2], mixing parameter (1.0 is vanilla)
- * @param safeguard_factor  factor that controls safeguarding checks
+ * @param relaxation        finite float \in [0,2], mixing parameter (1.0 is vanilla)
+ * @param safeguard_factor  finite nonnegative factor that controls safeguarding checks
  *                          larger is more aggressive but less stable
- * @param max_weight_norm   float, maximum norm of AA weights
+ * @param max_weight_norm   finite positive float, maximum norm of AA weights
  * @param ir_max_steps      max iterative refinement passes on the γ solve.
  *                          0 disables IR. Each step is O(mem²) and loops
  *                          until the correction stops contracting, so on

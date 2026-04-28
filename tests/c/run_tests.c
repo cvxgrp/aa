@@ -259,6 +259,29 @@ static const char *test_ir_max_steps_negative_rejected(void) {
   return 0;
 }
 
+/* Non-finite scalar options must be rejected. NaN is especially easy to
+ * miss because comparisons like `relaxation < 0` are false for NaN. */
+static const char *test_nonfinite_scalar_options_rejected(void) {
+  AaWork *a;
+
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, NAN, 2.0, 1e10, 5, 0);
+  mu_assert("aa_init(relaxation=NaN) should return NULL", a == NULL);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, INFINITY, 2.0, 1e10, 5, 0);
+  mu_assert("aa_init(relaxation=Inf) should return NULL", a == NULL);
+
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, NAN, 1e10, 5, 0);
+  mu_assert("aa_init(safeguard_factor=NaN) should return NULL", a == NULL);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, INFINITY, 1e10, 5, 0);
+  mu_assert("aa_init(safeguard_factor=Inf) should return NULL", a == NULL);
+
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, NAN, 5, 0);
+  mu_assert("aa_init(max_weight_norm=NaN) should return NULL", a == NULL);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, INFINITY, 5, 0);
+  mu_assert("aa_init(max_weight_norm=Inf) should return NULL", a == NULL);
+
+  return 0;
+}
+
 /* ir_max_steps=0 disables iterative refinement entirely. The solve
  * path still runs end-to-end and AA still converges on an easy
  * well-conditioned problem. */
@@ -1009,6 +1032,8 @@ static const char *all_tests(void) {
   mu_run_test(test_dim_zero_rejected);
   printf("unit: negative ir_max_steps is rejected\n");
   mu_run_test(test_ir_max_steps_negative_rejected);
+  printf("unit: non-finite scalar options are rejected\n");
+  mu_run_test(test_nonfinite_scalar_options_rejected);
   printf("unit: ir_max_steps=0 (IR disabled) still solves\n");
   mu_run_test(test_ir_max_steps_zero_still_solves);
   printf("unit: ir_max_steps variants both converge on ill-conditioned GD\n");

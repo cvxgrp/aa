@@ -620,9 +620,11 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
    * gets against `dim`, so callers can pass `min_len = mem` without
    * caring whether mem exceeded dim. When mem == 0 (AA off), min_len
    * is ignored entirely. */
-  if (dim <= 0 || mem < 0 || !isfinite(regularization) ||
-      relaxation < 0 || relaxation > 2 ||
-      safeguard_factor < 0 || max_weight_norm <= 0 ||
+  if (dim <= 0 || mem < 0 ||
+      !isfinite(regularization) ||
+      !isfinite(relaxation) || relaxation < 0 || relaxation > 2 ||
+      !isfinite(safeguard_factor) || safeguard_factor < 0 ||
+      !isfinite(max_weight_norm) || max_weight_norm <= 0 ||
       ir_max_steps < 0 ||
       (mem_clamped > 0 && min_len < 1)) {
     printf("Invalid AA parameters.\n");
