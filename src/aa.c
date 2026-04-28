@@ -316,12 +316,17 @@ static void update_accel_params(const aa_float *x, const aa_float *f, AaWork *a,
   memcpy(y_col, a->g, sizeof(aa_float) * a->dim);
   BLAS(axpy)(&bdim, &neg_onef, a->g_prev, &one, y_col, &one);
 
-  /* Update the per-column cached norms for the slot we just rewrote.
-   * compute_regularization reduces these on demand. Store the norm
-   * itself (not its square) — squaring here would throw away the
-   * overflow/underflow safety that nrm2 guarantees. */
-  a->nrm_s_col[idx] = BLAS(nrm2)(&bdim, s_col, &one);
-  a->nrm_y_col[idx] = BLAS(nrm2)(&bdim, y_col, &one);
+  /* Update the per-column cached norms only when the scaled
+   * regularization path will read them. Pinned/no regularization skips
+   * compute_regularization entirely, and Type-II uses Y for both A and B,
+   * so S norms are unused there. Store the norm itself (not its square) to
+   * preserve nrm2's overflow/underflow safety. */
+  if (a->regularization > 0) {
+    if (a->type1) {
+      a->nrm_s_col[idx] = BLAS(nrm2)(&bdim, s_col, &one);
+    }
+    a->nrm_y_col[idx] = BLAS(nrm2)(&bdim, y_col, &one);
+  }
 
   /* State advance for next iter: (x_prev, f_prev, g_prev) <- (x, f, g).
    * Must follow all the reads above. */
