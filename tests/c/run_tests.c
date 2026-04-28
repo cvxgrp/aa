@@ -10,6 +10,7 @@
  */
 #include "aa.h"
 #include "aa_blas.h"
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -249,6 +250,17 @@ static const char *test_mem_zero_is_noop(void) {
 static const char *test_dim_zero_rejected(void) {
   AaWork *a = aa_init(0, 1, /*min_len=*/1, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
   mu_assert("aa_init(dim=0) should return NULL", a == NULL);
+  return 0;
+}
+
+static const char *test_dimension_overflow_rejected(void) {
+  AaWork *a = aa_init(INT_MAX, 1, /*min_len=*/1, 1, 1e-8, 1.0, 2.0,
+                      1e10, 5, 0);
+  mu_assert("aa_init should reject dim+mem overflow", a == NULL);
+
+  a = aa_init(INT_MAX, INT_MAX, /*min_len=*/1, 1, 1e-8, 1.0, 2.0,
+              1e10, 5, 0);
+  mu_assert("aa_init should reject oversized dim/mem dimensions", a == NULL);
   return 0;
 }
 
@@ -1007,6 +1019,8 @@ static const char *all_tests(void) {
   mu_run_test(test_mem_zero_is_noop);
   printf("unit: dim=0 is rejected\n");
   mu_run_test(test_dim_zero_rejected);
+  printf("unit: overflowing dimensions are rejected\n");
+  mu_run_test(test_dimension_overflow_rejected);
   printf("unit: negative ir_max_steps is rejected\n");
   mu_run_test(test_ir_max_steps_negative_rejected);
   printf("unit: ir_max_steps=0 (IR disabled) still solves\n");

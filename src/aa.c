@@ -31,6 +31,7 @@
  */
 
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 
 #include "aa.h"
@@ -44,6 +45,10 @@
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+static int size_mul_overflows(size_t a, size_t b) {
+  return b != 0 && a > ((size_t)-1) / b;
+}
 
 #if PROFILING > 0
 
@@ -612,6 +617,10 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
   TIME_TIC
   AaWork *a;
   aa_int mem_clamped = MIN(mem, dim);
+  aa_int aug_rows = 0;
+  size_t dim_mem_count = 0;
+  size_t aug_mem_count = 0;
+  size_t mem_mem_count = 0;
   /* `regularization` is accepted with either sign: positive = scaled by
    * ||A||_F ||Y||_F; negative = pinned absolute |regularization|; zero = off.
    * Only NaN / non-finite values are rejected (via the !isfinite check).
@@ -627,6 +636,37 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
       (mem_clamped > 0 && min_len < 1)) {
     printf("Invalid AA parameters.\n");
     return (AaWork *)0;
+  }
+  if (mem_clamped > 0) {
+    size_t dim_count = (size_t)dim;
+    size_t mem_count = (size_t)mem_clamped;
+    size_t max_elem_size = sizeof(aa_float) > sizeof(blas_int)
+                               ? sizeof(aa_float)
+                               : sizeof(blas_int);
+    size_t max_alloc_count = ((size_t)-1) / max_elem_size;
+    if (dim > INT_MAX - mem_clamped) {
+      printf("Invalid AA dimensions.\n");
+      return (AaWork *)0;
+    }
+    aug_rows = dim + mem_clamped;
+    if (size_mul_overflows(dim_count, mem_count) ||
+        size_mul_overflows((size_t)aug_rows, mem_count) ||
+        size_mul_overflows(mem_count, mem_count)) {
+      printf("Invalid AA dimensions.\n");
+      return (AaWork *)0;
+    }
+    dim_mem_count = dim_count * mem_count;
+    aug_mem_count = (size_t)aug_rows * mem_count;
+    mem_mem_count = mem_count * mem_count;
+    if (dim_count > max_alloc_count ||
+        mem_count > max_alloc_count ||
+        (size_t)aug_rows > max_alloc_count ||
+        dim_mem_count > max_alloc_count ||
+        aug_mem_count > max_alloc_count ||
+        mem_mem_count > max_alloc_count) {
+      printf("Invalid AA dimensions.\n");
+      return (AaWork *)0;
+    }
   }
   a = (AaWork *)calloc(1, sizeof(AaWork));
   if (!a) {
@@ -664,14 +704,13 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
 
   a->g_prev = (aa_float *)calloc(a->dim, sizeof(aa_float));
 
-  a->Y = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
-  a->S = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
-  a->D = (aa_float *)calloc(a->dim * a->mem, sizeof(aa_float));
+  a->Y = (aa_float *)calloc(dim_mem_count, sizeof(aa_float));
+  a->S = (aa_float *)calloc(dim_mem_count, sizeof(aa_float));
+  a->D = (aa_float *)calloc(dim_mem_count, sizeof(aa_float));
 
   {
-    aa_int aug_rows = a->dim + a->mem;
-    a->A_aug = (aa_float *)calloc((size_t)aug_rows * a->mem, sizeof(aa_float));
-    a->c_aug = (aa_float *)calloc((size_t)aug_rows, sizeof(aa_float));
+    a->A_aug = (aa_float *)calloc(aug_mem_count, sizeof(aa_float));
+    a->c_aug = (aa_float *)calloc(aug_rows, sizeof(aa_float));
     a->tau = (aa_float *)calloc(a->mem, sizeof(aa_float));
     a->jpvt = (blas_int *)calloc(a->mem, sizeof(blas_int));
 
@@ -688,9 +727,9 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
      * W_orig preserves W across gesv so iterative refinement can form
      * the residual c_top − W γ. */
     if (type1) {
-      a->B_aug = (aa_float *)calloc((size_t)aug_rows * a->mem, sizeof(aa_float));
-      a->W = (aa_float *)calloc((size_t)a->mem * a->mem, sizeof(aa_float));
-      a->W_orig = (aa_float *)calloc((size_t)a->mem * a->mem, sizeof(aa_float));
+      a->B_aug = (aa_float *)calloc(aug_mem_count, sizeof(aa_float));
+      a->W = (aa_float *)calloc(mem_mem_count, sizeof(aa_float));
+      a->W_orig = (aa_float *)calloc(mem_mem_count, sizeof(aa_float));
       a->ipiv = (blas_int *)calloc(a->mem, sizeof(blas_int));
     } else {
       a->B_aug = NULL;
