@@ -31,6 +31,14 @@
 #define PRINT_INTERVAL (500)
 #define VERBOSITY (1)
 
+#ifndef SFLOAT
+#define REG_SCALE_HI (1e200)
+#define REG_SCALE_LO (1e-200)
+#else
+#define REG_SCALE_HI (1e30f)
+#define REG_SCALE_LO (1e-30f)
+#endif
+
 int tests_run = 0;
 
 #ifdef _WIN32
@@ -691,6 +699,55 @@ static const char *test_pinned_regularization(void) {
   return 0;
 }
 
+/* Scaled regularization is r = reg * ||A||_F * ||Y||_F. This must be
+ * computed without overflowing/underflowing intermediate products when the
+ * final r is representable. */
+static const char *test_scaled_regularization_extreme_intermediates(void) {
+  const aa_float hi = (aa_float)REG_SCALE_HI;
+  const aa_float lo = (aa_float)REG_SCALE_LO;
+  AaStats s;
+
+  {
+    AaWork *a = aa_init(2, 1, /*min_len=*/1, /*type1=*/1, hi,
+                        /*relax=*/1.0, /*safeguard=*/2.0,
+                        /*max_w=*/hi, /*ir_max_steps=*/5, /*verbosity=*/0);
+    aa_float x0[2] = {0.0, 0.0};
+    aa_float f0[2] = {0.0, 0.0};
+    aa_float x1[2] = {hi, lo};
+    aa_float f1[2] = {hi, 0.0};
+    aa_apply(f0, x0, a);
+    aa_apply(f1, x1, a);
+    s = aa_get_stats(a);
+    aa_finish(a);
+    mu_assert("scaled r overflowed despite finite true product",
+              isfinite(s.last_regularization));
+    mu_assert("scaled r lost high-scale finite product",
+              s.last_regularization > hi * (aa_float)0.1);
+    mu_assert("scaled r high-scale product is unexpectedly large",
+              s.last_regularization < hi * (aa_float)10.0);
+  }
+
+  {
+    AaWork *a = aa_init(2, 1, /*min_len=*/1, /*type1=*/1, lo,
+                        /*relax=*/1.0, /*safeguard=*/2.0,
+                        /*max_w=*/hi, /*ir_max_steps=*/5, /*verbosity=*/0);
+    aa_float x0[2] = {0.0, 0.0};
+    aa_float f0[2] = {0.0, 0.0};
+    aa_float x1[2] = {lo, 0.0};
+    aa_float f1[2] = {lo, -hi};
+    aa_apply(f0, x0, a);
+    aa_apply(f1, x1, a);
+    s = aa_get_stats(a);
+    aa_finish(a);
+    mu_assert("scaled r underflowed despite finite true product",
+              s.last_regularization > 0);
+    mu_assert("scaled r low-scale product is unexpectedly large",
+              s.last_regularization < lo * (aa_float)10.0);
+  }
+
+  return 0;
+}
+
 /* min_len=1: AA should start extrapolating on iter 1 (as soon as the first
  * residual pair is buffered) and still converge comparably to min_len=mem
  * on a well-conditioned problem. Without min_len you couldn't get this
@@ -1055,6 +1112,8 @@ static const char *all_tests(void) {
   mu_run_test(test_rank_deficient_memory_oversized_mem);
   printf("unit: pinned regularization mode works\n");
   mu_run_test(test_pinned_regularization);
+  printf("unit: scaled regularization handles extreme intermediates\n");
+  mu_run_test(test_scaled_regularization_extreme_intermediates);
   printf("unit: AA accelerates convergence vs plain GD\n");
   mu_run_test(test_aa_accelerates_convergence);
   printf("unit: aa_get_stats basic counters\n");

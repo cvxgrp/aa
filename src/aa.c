@@ -38,12 +38,41 @@
 
 #ifndef SFLOAT
 #define AA_EPS DBL_EPSILON
+#define AA_FLOAT_MAX DBL_MAX
 #else
 #define AA_EPS FLT_EPSILON
+#define AA_FLOAT_MAX FLT_MAX
 #endif
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+
+/* Compute x*y*z for nonnegative finite values without letting an
+ * intermediate product overflow or underflow when the final result is still
+ * representable. If the true result exceeds aa_float range, clamp to the
+ * largest finite value; if it is below the subnormal floor, ldexp returns 0. */
+static aa_float scaled_product3(aa_float x, aa_float y, aa_float z) {
+  int ex, ey, ez, emax, e;
+  aa_float mx, my, mz, m, mmax;
+
+  if (x == 0 || y == 0 || z == 0) return 0;
+  if (!isfinite(x) || !isfinite(y) || !isfinite(z)) return NAN;
+
+  mx = frexp(x, &ex);
+  my = frexp(y, &ey);
+  mz = frexp(z, &ez);
+  m = mx * my * mz;
+  e = ex + ey + ez;
+
+  while (m > 0 && m < 0.5) {
+    m *= 2;
+    e--;
+  }
+
+  mmax = frexp(AA_FLOAT_MAX, &emax);
+  if (e > emax || (e == emax && m > mmax)) return AA_FLOAT_MAX;
+  return ldexp(m, e);
+}
 
 #if PROFILING > 0
 
@@ -232,7 +261,7 @@ static aa_float compute_regularization(AaWork *a) {
   TIME_TIC
   aa_float nrm_y = frob_from_col_norms(a->nrm_y_col, a->mem);
   aa_float nrm_a = a->type1 ? frob_from_col_norms(a->nrm_s_col, a->mem) : nrm_y;
-  aa_float r = a->regularization * nrm_a * nrm_y;
+  aa_float r = scaled_product3(a->regularization, nrm_a, nrm_y);
   if (a->verbosity > 2) {
     printf("iter: %i, ||A||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
            (int)a->iter, nrm_a, nrm_y, r);
