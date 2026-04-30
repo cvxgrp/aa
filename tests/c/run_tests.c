@@ -34,9 +34,11 @@
 #ifndef SFLOAT
 #define REG_SCALE_HI (1e200)
 #define REG_SCALE_LO (1e-200)
+#define REG_SCALE_MID (1e154)
 #else
 #define REG_SCALE_HI (1e30f)
 #define REG_SCALE_LO (1e-30f)
+#define REG_SCALE_MID (1e18f)
 #endif
 
 int tests_run = 0;
@@ -705,6 +707,8 @@ static const char *test_pinned_regularization(void) {
 static const char *test_scaled_regularization_extreme_intermediates(void) {
   const aa_float hi = (aa_float)REG_SCALE_HI;
   const aa_float lo = (aa_float)REG_SCALE_LO;
+  const aa_float mid = (aa_float)REG_SCALE_MID;
+  const aa_float inv_mid = (aa_float)(1.0 / REG_SCALE_MID);
   AaStats s;
 
   {
@@ -713,8 +717,8 @@ static const char *test_scaled_regularization_extreme_intermediates(void) {
                         /*max_w=*/hi, /*ir_max_steps=*/5, /*verbosity=*/0);
     aa_float x0[2] = {0.0, 0.0};
     aa_float f0[2] = {0.0, 0.0};
-    aa_float x1[2] = {hi, lo};
-    aa_float f1[2] = {hi, 0.0};
+    aa_float x1[2] = {mid, inv_mid};
+    aa_float f1[2] = {mid, 0.0};
     aa_apply(f0, x0, a);
     aa_apply(f1, x1, a);
     s = aa_get_stats(a);
@@ -733,8 +737,8 @@ static const char *test_scaled_regularization_extreme_intermediates(void) {
                         /*max_w=*/hi, /*ir_max_steps=*/5, /*verbosity=*/0);
     aa_float x0[2] = {0.0, 0.0};
     aa_float f0[2] = {0.0, 0.0};
-    aa_float x1[2] = {lo, 0.0};
-    aa_float f1[2] = {lo, -hi};
+    aa_float x1[2] = {inv_mid, 0.0};
+    aa_float f1[2] = {inv_mid, -mid};
     aa_apply(f0, x0, a);
     aa_apply(f1, x1, a);
     s = aa_get_stats(a);
