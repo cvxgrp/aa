@@ -43,12 +43,12 @@ cdef class AndersonAccelerator(object):
         #   = 0  → off
         if not math.isfinite(regularization):
             raise ValueError("regularization must be finite")
-        if relaxation < 0 or relaxation > 2:
-            raise ValueError("relaxation must be in [0, 2]")
-        if safeguard_factor < 0:
-            raise ValueError("safeguard_factor must be non-negative")
-        if max_weight_norm <= 0:
-            raise ValueError("max_weight_norm must be positive")
+        if not math.isfinite(relaxation) or relaxation < 0 or relaxation > 2:
+            raise ValueError("relaxation must be finite and in [0, 2]")
+        if not math.isfinite(safeguard_factor) or safeguard_factor < 0:
+            raise ValueError("safeguard_factor must be finite and non-negative")
+        if not math.isfinite(max_weight_norm) or max_weight_norm <= 0:
+            raise ValueError("max_weight_norm must be finite and positive")
         if ir_max_steps < 0:
             raise ValueError("ir_max_steps must be non-negative")
         # min_len: minimum # of residual pairs before AA starts extrapolating.

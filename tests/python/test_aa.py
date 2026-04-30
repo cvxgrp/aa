@@ -93,9 +93,15 @@ def test_construct_dim_one():
         (dict(dim=DIM, mem=-1), "mem must be non-negative"),
         (dict(dim=DIM, mem=MEM, regularization=float("nan")), "regularization must be finite"),
         (dict(dim=DIM, mem=MEM, regularization=float("inf")), "regularization must be finite"),
-        (dict(dim=DIM, mem=MEM, relaxation=3.0), "relaxation must be in \\[0, 2\\]"),
-        (dict(dim=DIM, mem=MEM, safeguard_factor=-1.0), "safeguard_factor must be non-negative"),
-        (dict(dim=DIM, mem=MEM, max_weight_norm=0.0), "max_weight_norm must be positive"),
+        (dict(dim=DIM, mem=MEM, relaxation=float("nan")), "relaxation must be finite"),
+        (dict(dim=DIM, mem=MEM, relaxation=float("inf")), "relaxation must be finite"),
+        (dict(dim=DIM, mem=MEM, relaxation=3.0), "relaxation must be finite and in \\[0, 2\\]"),
+        (dict(dim=DIM, mem=MEM, safeguard_factor=float("nan")), "safeguard_factor must be finite"),
+        (dict(dim=DIM, mem=MEM, safeguard_factor=float("inf")), "safeguard_factor must be finite"),
+        (dict(dim=DIM, mem=MEM, safeguard_factor=-1.0), "safeguard_factor must be finite and non-negative"),
+        (dict(dim=DIM, mem=MEM, max_weight_norm=float("nan")), "max_weight_norm must be finite"),
+        (dict(dim=DIM, mem=MEM, max_weight_norm=float("inf")), "max_weight_norm must be finite"),
+        (dict(dim=DIM, mem=MEM, max_weight_norm=0.0), "max_weight_norm must be finite and positive"),
     ],
 )
 def test_construct_invalid_args_raise_value_error(kwargs, message):
