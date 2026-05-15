@@ -137,7 +137,7 @@ static const char *gd(aa_int type1, aa_float relaxation) {
 
   AaWork *a = aa_init(n, memory, /*min_len=*/memory, type1,
                       regularization, relaxation, safeguard_tolerance,
-                      max_aa_norm, /*ir_max_steps=*/5, verbosity);
+                      max_aa_norm, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       _tic(&aa_timer);
@@ -197,7 +197,7 @@ static aa_float diag_gd(const aa_float *Qdiag, aa_int n, aa_float step,
     x[i] = rand_float();
   }
   AaWork *a = aa_init(n, mem, /*min_len=*/mem, type1, /*reg=*/1e-10,
-                      relaxation, /*safeguard=*/2.0, /*max_w=*/1e10,
+                      relaxation, /*safeguard=*/2.0, /*max_w=*/1e10, /*trust_factor=*/INFINITY,
                       /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < iters; i++) {
     if (i > 0) {
@@ -222,7 +222,7 @@ static const char *test_mem_zero_is_noop(void) {
   /* min_len is ignored when mem=0 — pass the sentinel 0 to make that
    * explicit (a nonzero value would also be accepted since the range
    * check is gated on mem>0). */
-  AaWork *a = aa_init(10, 0, /*min_len=*/0, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(10, 0, /*min_len=*/0, 1, 1e-8, 1.0, 2.0, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(mem=0) returned NULL", a != NULL);
 
   aa_float x[10], xprev[10];
@@ -247,14 +247,14 @@ static const char *test_mem_zero_is_noop(void) {
 }
 
 static const char *test_dim_zero_rejected(void) {
-  AaWork *a = aa_init(0, 1, /*min_len=*/1, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(0, 1, /*min_len=*/1, 1, 1e-8, 1.0, 2.0, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(dim=0) should return NULL", a == NULL);
   return 0;
 }
 
 /* Negative ir_max_steps is invalid and must be rejected at init. */
 static const char *test_ir_max_steps_negative_rejected(void) {
-  AaWork *a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, -1, 0);
+  AaWork *a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, INFINITY, -1, 0);
   mu_assert("aa_init(ir_max_steps=-1) should return NULL", a == NULL);
   return 0;
 }
@@ -264,20 +264,36 @@ static const char *test_ir_max_steps_negative_rejected(void) {
 static const char *test_nonfinite_scalar_options_rejected(void) {
   AaWork *a;
 
-  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, NAN, 2.0, 1e10, 5, 0);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, NAN, 2.0, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(relaxation=NaN) should return NULL", a == NULL);
-  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, INFINITY, 2.0, 1e10, 5, 0);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, INFINITY, 2.0, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(relaxation=Inf) should return NULL", a == NULL);
 
-  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, NAN, 1e10, 5, 0);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, NAN, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(safeguard_factor=NaN) should return NULL", a == NULL);
-  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, INFINITY, 1e10, 5, 0);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, INFINITY, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(safeguard_factor=Inf) should return NULL", a == NULL);
 
-  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, NAN, 5, 0);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, NAN, INFINITY, 5, 0);
   mu_assert("aa_init(max_weight_norm=NaN) should return NULL", a == NULL);
-  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, INFINITY, 5, 0);
-  mu_assert("aa_init(max_weight_norm=Inf) should return NULL", a == NULL);
+  /* INFINITY is the "no cap" sentinel for max_weight_norm — must accept. */
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, INFINITY, INFINITY, 5, 0);
+  mu_assert("aa_init(max_weight_norm=Inf) should accept", a != NULL);
+  aa_finish(a);
+
+  /* trust_factor rejects NaN and non-positive; INFINITY = no cap (default). */
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, NAN, 5, 0);
+  mu_assert("aa_init(trust_factor=NaN) should return NULL", a == NULL);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, 0.0, 5, 0);
+  mu_assert("aa_init(trust_factor=0) should return NULL", a == NULL);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, -1.0, 5, 0);
+  mu_assert("aa_init(trust_factor<0) should return NULL", a == NULL);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, INFINITY, 5, 0);
+  mu_assert("aa_init(trust_factor=Inf) should accept", a != NULL);
+  aa_finish(a);
+  a = aa_init(4, 2, /*min_len=*/2, 1, 1e-8, 1.0, 2.0, 1e10, 10.0, 5, 0);
+  mu_assert("aa_init(trust_factor=10) should accept", a != NULL);
+  aa_finish(a);
 
   return 0;
 }
@@ -297,7 +313,7 @@ static const char *test_ir_max_steps_zero_still_solves(void) {
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   AaWork *a = aa_init(n, /*mem=*/5, /*min_len=*/5, /*type1=*/1,
                       /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/0, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/0, /*verbosity=*/0);
   mu_assert("aa_init(ir_max_steps=0) must accept", a != NULL);
   for (aa_int i = 0; i < 500; i++) {
     if (i > 0) aa_apply(x, xprev, a);
@@ -337,7 +353,7 @@ static const char *test_ir_max_steps_no_regression_on_ill_conditioned(void) {
     for (aa_int i = 0; i < n; i++) x[i] = rand_float();
     AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/10, /*type1=*/0,
                         /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
-                        /*max_w=*/1e10, caps[k], /*verbosity=*/0);
+                        /*max_w=*/1e10, /*trust_factor=*/INFINITY, caps[k], /*verbosity=*/0);
     for (aa_int i = 0; i < 2000; i++) {
       if (i > 0) aa_apply(x, xprev, a);
       memcpy(xprev, x, n * sizeof(aa_float));
@@ -408,7 +424,7 @@ static const char *test_reset_matches_fresh_init(void) {
   aa_float step = 1.0;
   aa_float x0[5] = {1, 1, 1, 1, 1};
 
-  AaWork *a = aa_init(n, 3, /*min_len=*/3, 1, 1e-10, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(n, 3, /*min_len=*/3, 1, 1e-10, 1.0, 2.0, 1e10, INFINITY, 5, 0);
 
   /* First run: 20 iters from x0. */
   aa_float x[5], xprev[5];
@@ -443,7 +459,7 @@ static const char *test_reset_matches_fresh_init(void) {
 /* reset must clear any "last AA step succeeded" state so a subsequent
  * safeguard call cannot roll inputs back to pre-reset iterates. */
 static const char *test_reset_clears_stale_safeguard_state(void) {
-  AaWork *a = aa_init(2, 2, /*min_len=*/2, 1, 1e-8, 1.0, 1.0, 1e10, 5, 0);
+  AaWork *a = aa_init(2, 2, /*min_len=*/2, 1, 1e-8, 1.0, 1.0, 1e10, INFINITY, 5, 0);
   aa_float x[2] = {1.0, 1.0};
   aa_float f[2] = {0.5, 0.5};
 
@@ -572,7 +588,7 @@ static const char *test_zero_reg_near_singular_y(void) {
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/10, /*type1=*/0,
                       /*reg=*/0.0, /*relax=*/1.0, /*safeguard=*/2.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < 2000; i++) {
     if (i > 0) aa_apply(x, xprev, a);
     memcpy(xprev, x, n * sizeof(aa_float));
@@ -648,7 +664,7 @@ static aa_float diag_gd_with_reg(const aa_float *Qdiag, aa_int n, aa_float step,
   srand(seed);
   for (aa_int i = 0; i < n; i++) x_out[i] = rand_float();
   AaWork *a = aa_init(n, mem, /*min_len=*/mem, type1, reg, /*relax=*/1.0,
-                      /*safeguard=*/2.0, /*max_w=*/1e10,
+                      /*safeguard=*/2.0, /*max_w=*/1e10, /*trust_factor=*/INFINITY,
                       /*ir_max_steps=*/5, /*verbosity=*/0);
   for (aa_int i = 0; i < iters; i++) {
     if (i > 0) aa_apply(x_out, xprev, a);
@@ -731,7 +747,7 @@ static const char *test_min_len_one_accelerates_early(void) {
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/1, /*type1=*/0,
                       /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init(min_len=1) returned NULL", a != NULL);
   aa_int applies = 0;
   for (aa_int i = 0; i < 100; i++) {
@@ -772,7 +788,7 @@ static const char *test_min_len_half_mem(void) {
   for (aa_int i = 0; i < 10; i++) x[i] = rand_float();
   AaWork *a = aa_init(10, /*mem=*/8, /*min_len=*/4, /*type1=*/1,
                       /*reg=*/1e-8, /*relax=*/1.0, /*safeguard=*/2.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init(min_len=4) returned NULL", a != NULL);
   for (aa_int i = 0; i < 300; i++) {
     if (i > 0) aa_apply(x, xprev, a);
@@ -805,7 +821,7 @@ static const char *test_min_len_equal_mem_matches_default(void) {
 /* min_len=0 with mem>0 must be rejected. */
 static const char *test_min_len_zero_rejected(void) {
   AaWork *a = aa_init(5, /*mem=*/3, /*min_len=*/0, 1, 1e-8, 1.0,
-                      2.0, 1e10, 5, 0);
+                      2.0, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(min_len=0, mem=3) should return NULL", a == NULL);
   return 0;
 }
@@ -813,7 +829,7 @@ static const char *test_min_len_zero_rejected(void) {
 /* min_len is ignored when mem=0 — any value (incl 0 or nonsense) accepted. */
 static const char *test_min_len_ignored_when_mem_zero(void) {
   AaWork *a = aa_init(5, /*mem=*/0, /*min_len=*/999, 1, 1e-8, 1.0,
-                      2.0, 1e10, 5, 0);
+                      2.0, 1e10, INFINITY, 5, 0);
   mu_assert("aa_init(mem=0) should accept any min_len", a != NULL);
   aa_finish(a);
   return 0;
@@ -832,7 +848,7 @@ static const char *test_min_len_exceeding_mem_is_clamped(void) {
   for (aa_int i = 0; i < 10; i++) x[i] = rand_float();
   AaWork *a = aa_init(10, /*mem=*/5, /*min_len=*/50, /*type1=*/0,
                       /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/2.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init should clamp min_len > mem silently", a != NULL);
   for (aa_int i = 0; i < 300; i++) {
     if (i > 0) aa_apply(x, xprev, a);
@@ -867,7 +883,7 @@ static const char *test_min_len_survives_safeguard_churn(void) {
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   AaWork *a = aa_init(n, /*mem=*/10, /*min_len=*/1, /*type1=*/0,
                       /*reg=*/1e-10, /*relax=*/1.0, /*safeguard=*/1.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init(min_len=1) returned NULL", a != NULL);
   for (aa_int i = 0; i < 2000; i++) {
     if (i > 0) aa_apply(x, xprev, a);
@@ -889,7 +905,7 @@ static const char *test_min_len_survives_safeguard_churn(void) {
  * unconditionally call aa_apply without branching. */
 static const char *test_first_iter_is_noop_on_f(void) {
   const aa_int n = 4;
-  AaWork *a = aa_init(n, 3, /*min_len=*/3, 1, 1e-8, 1.0, 2.0, 1e10, 5, 0);
+  AaWork *a = aa_init(n, 3, /*min_len=*/3, 1, 1e-8, 1.0, 2.0, 1e10, INFINITY, 5, 0);
   aa_float x[4] = {0.1, 0.2, 0.3, 0.4};
   aa_float xprev[4] = {0, 0, 0, 0};
   aa_float snapshot[4];
@@ -925,7 +941,7 @@ static const char *test_stats_basic_counters(void) {
   for (aa_int i = 0; i < n; i++) x[i] = rand_float();
   AaWork *a = aa_init(n, /*mem=*/5, /*min_len=*/5, /*type1=*/0,
                       /*reg=*/1e-12, /*relax=*/1.0, /*safeguard=*/2.0,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init returned NULL", a != NULL);
 
   AaStats s = aa_get_stats(a);
@@ -979,7 +995,7 @@ static const char *test_stats_survive_safeguard_reject(void) {
    * a safeguard rejection on the first post-solve iteration. */
   AaWork *a = aa_init(n, /*mem=*/2, /*min_len=*/2, /*type1=*/0,
                       /*reg=*/1e-12, /*relax=*/1.0, /*safeguard=*/0.01,
-                      /*max_w=*/1e10, /*ir_max_steps=*/5, /*verbosity=*/0);
+                      /*max_w=*/1e10, /*trust_factor=*/INFINITY, /*ir_max_steps=*/5, /*verbosity=*/0);
   mu_assert("aa_init returned NULL", a != NULL);
 
   /* Hand-driven sequence chosen to land in the safeguard reject branch. */

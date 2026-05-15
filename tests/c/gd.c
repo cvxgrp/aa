@@ -1,6 +1,7 @@
 /* Gradient descent (GD) on convex quadratic */
 #include "aa.h"
 #include "aa_blas.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -144,7 +145,8 @@ int main(int argc, char **argv) {
 
   AaWork *a = aa_init(n, memory, /*min_len=*/memory, type1,
                       regularization, relaxation, safeguard_tolerance,
-                      max_aa_norm, /*ir_max_steps=*/5, verbosity);
+                      max_aa_norm, /*trust_factor=*/INFINITY,
+                      /*ir_max_steps=*/5, verbosity);
   for (i = 0; i < iters; i++) {
     if (i > 0) {
       _tic(&aa_timer);
