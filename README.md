@@ -115,18 +115,20 @@ examples requires installing `matplotlib` (`pip install matplotlib`).
 ## Quickstart (C)
 
 ```c
+#include <math.h>      /* INFINITY */
 #include "aa.h"
 
-AaWork *a = aa_init(n,     /* dim              */
-                    10,    /* mem              */
-                    10,    /* min_len          */
-                    1,     /* type1            */
-                    1e-8,  /* regularization   */
-                    1.0,   /* relaxation       */
-                    2.0,   /* safeguard_factor */
-                    1e10,  /* max_weight_norm  */
-                    5,     /* ir_max_steps     */
-                    0);    /* verbosity        */
+AaWork *a = aa_init(n,        /* dim              */
+                    10,       /* mem              */
+                    10,       /* min_len          */
+                    1,        /* type1            */
+                    1e-8,     /* regularization   */
+                    1.0,      /* relaxation       */
+                    2.0,      /* safeguard_factor */
+                    INFINITY, /* max_weight_norm  */
+                    INFINITY, /* trust_factor     */
+                    5,        /* ir_max_steps     */
+                    0);       /* verbosity        */
 
 for (int i = 0; i < N; i++) {
     if (i > 0) aa_apply(x, x_prev, a);
@@ -152,7 +154,8 @@ See [`tests/c/gd.c`](tests/c/gd.c) for a complete runnable example
 | `regularization`   | Tikhonov regularization on the AA least-squares system. `> 0`: scaled by `‖S‖_F·‖Y‖_F` (same for Type-I and Type-II — historically Type-II used `‖Y‖²` which decays quadratically as `Y→0` and underflows on slow-contraction maps). `< 0`: pinned absolute `-regularization` (no scaling). `= 0`: off. | Type-I: `1e-8`, Type-II: `1e-12`        |
 | `relaxation`       | Mixing parameter in `[0, 2]`; `1.0` is vanilla AA                                                 | `1.0`                                   |
 | `safeguard_factor` | Multiplier on the residual-growth ratio beyond which the AA step is rejected. Larger = more aggressive. | `2.0`                                   |
-| `max_weight_norm`  | Upper bound on the norm of the AA combination weights; rejects numerically unstable steps         | `1e6` – `1e10`                          |
+| `max_weight_norm`  | Hard cap: reject solves with `‖γ‖₂ ≥ max_weight_norm`. Pass `INFINITY` to disable. | `1e6` – `1e10` or `INFINITY`            |
+| `trust_factor`     | Opt-in trust region + adaptive regularization (see "Trust-region mode" below). Pass `INFINITY` to disable; pass a finite positive value (typically `10`) to enable. | `INFINITY` (off), or `~10` for ADMM/DRS |
 | `ir_max_steps`     | Cap on iterative-refinement passes for the weight solve. The loop stops early when refinement stalls, so this is an upper bound; raise for ill-conditioned problems, lower for tighter cost bounds. | `5`                                     |
 | `verbosity`        | `0` silent, higher values print progress and diagnostics                                          | `0`                                     |
 
@@ -161,6 +164,42 @@ problems but can be sensitive; Type-II is more robust. If one fails, try the
 other. Both tolerate nonsmooth `F` thanks to the safeguard, though
 convergence guarantees in that regime are stronger for Type-I (see the paper).
 
+### Trust-region mode (opt-in)
+
+Setting `trust_factor` to a finite positive value (typically `10`) turns on
+two coupled mechanisms that target a failure mode seen on slow-contraction
+maps (ADMM / DRS / proximal splitting): AA's least-squares system underflows
+near convergence, the weight vector `γ` blows up, and the safeguard's
+monotone test (`‖g_new‖ ≤ ‖g_old‖`) is too weak to catch the resulting
+"creep" — each step marginally reduces the residual without approaching the
+fixed point.
+
+1. **Trust region.** Each AA solve rejects the step if `‖D γ‖₂ > trust_factor · ‖g‖₂`,
+   where `D` is the matrix of past `Δf` columns. This bounds the iterate
+   displacement relative to the current residual and catches the
+   "γ-passes-the-weight-cap-but-`Dγ`-is-huge" failure mode directly.
+
+2. **Adaptive regularization.** The Tikhonov term `r` is replaced by a
+   self-tuning value that starts large (so initial `γ ≈ 0`, i.e. AA ≈ `F`),
+   shrinks by `0.9×` on each safeguard accept (let AA do more), and grows
+   by `10×` on each rejection (back off toward `F`). The two mechanisms
+   feed each other: a trust trip bumps `r`, the next solve produces a
+   smaller `γ`, the trust check usually passes.
+
+`trust_factor = INFINITY` (the default) disables both mechanisms and the
+library uses the standard `ε · ‖S‖_F · ‖Y‖_F` regularization. The two paths
+are independent — turning trust-region mode on only matters for the kind of
+problem above.
+
+When to set `trust_factor`:
+
+| Situation                                                         | Recommendation             |
+|-------------------------------------------------------------------|----------------------------|
+| Gradient descent, prox iterations on well-scaled problems         | leave `INFINITY` (default) |
+| Operator-splitting solvers (ADMM, PDHG, Douglas-Rachford)         | try `trust_factor = 10`    |
+| Anything where AA produces `‖γ‖₂` in the hundreds but `‖g‖` doesn't keep dropping | try `trust_factor = 10`    |
+| Newton-like ill-conditioned problems where `γ` is legitimately huge | leave `INFINITY` (default) |
+
 ## Python API
 
 ```python
@@ -168,12 +207,13 @@ aa.AndersonAccelerator(
     dim,
     mem,
     *,
-    min_len=None,          # defaults to min(mem, dim)
+    min_len=None,           # defaults to min(mem, dim)
     type1=False,
     regularization=1e-12,
     relaxation=1.0,
     safeguard_factor=1.0,
-    max_weight_norm=1e6,
+    max_weight_norm=math.inf,
+    trust_factor=math.inf,  # see "Trust-region mode" above; ~10 for ADMM/DRS
     ir_max_steps=5,
     verbosity=0,
 )
@@ -187,7 +227,7 @@ C-contiguous, writeable `float64` numpy arrays of length `dim`.
 | `apply(f, x)`           | Call once per iteration (skip the first). `f` holds the most recent map output `F(x)`. Overwrites `f` in place with the AA-extrapolated point.    |
 | `safeguard(f_new, x_new)` | Call after running your map on the AA extrapolate. If AA did not make progress, reverts both arrays to the last-known-good state. Returns `0` on accept, `-1` on reject. |
 | `reset()`               | Clears AA state (equivalent to re-initializing) without reallocating. Lifetime `stats` counters are NOT cleared.                                 |
-| `stats`                 | Read-only property returning a dict of lifetime counters: `iter`, `n_accept`, `n_reject_lapack`, `n_reject_rank0`, `n_reject_nonfinite`, `n_reject_weight_cap`, `n_safeguard_reject`, `last_rank`, `last_aa_norm` (NaN until the first solve), `last_regularization`. Useful for diagnosing when AA isn't helping — rising `n_reject_weight_cap` or `n_reject_nonfinite` points at `max_weight_norm` / `regularization` tuning; rising `n_safeguard_reject` points at `safeguard_factor` / `mem`; `n_reject_rank0` is normal near convergence (memory is numerically zero). |
+| `stats`                 | Read-only property returning a dict of lifetime counters: `iter`, `n_accept`, `n_reject_lapack`, `n_reject_rank0`, `n_reject_nonfinite`, `n_reject_weight_cap`, `n_safeguard_reject`, `last_rank`, `last_aa_norm` (NaN until the first solve), `last_regularization`. Useful for diagnosing when AA isn't helping — high `n_safeguard_reject` with low `last_regularization` and high `last_aa_norm` on a slow-contraction problem suggests trying `trust_factor = 10`; rising `n_reject_weight_cap` or `n_reject_nonfinite` points at `max_weight_norm` / `regularization` tuning; rising `n_safeguard_reject` points at `safeguard_factor` / `mem`; `n_reject_rank0` is normal near convergence (memory is numerically zero). |
 
 ## C API
 
@@ -198,7 +238,8 @@ Python API exactly:
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
                 aa_float regularization, aa_float relaxation,
                 aa_float safeguard_factor, aa_float max_weight_norm,
-                aa_int ir_max_steps, aa_int verbosity);
+                aa_float trust_factor, aa_int ir_max_steps,
+                aa_int verbosity);
 
 aa_float aa_apply(aa_float *f, const aa_float *x, AaWork *a);
 aa_int   aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a);
