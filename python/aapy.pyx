@@ -19,7 +19,7 @@ cdef extern from "../include/aa.h":
         int last_rank
         double last_aa_norm
         double last_regularization
-    AaWork *aa_init(int, int, int, int, double, double, double, double, int, int)
+    AaWork *aa_init(int, int, int, int, double, double, double, double, double, int, int)
     double aa_apply(double*, const double*, AaWork*)
     int aa_safeguard(double*, double*, AaWork*)
     void aa_reset(AaWork*)
@@ -32,7 +32,8 @@ cdef class AndersonAccelerator(object):
 
     def __cinit__(self, dim, mem, *, min_len=None, type1=False,
                   regularization=1e-12, relaxation=1.0, safeguard_factor=1.0,
-                  max_weight_norm=1e6, ir_max_steps=5, verbosity=0):
+                  max_weight_norm=math.inf, trust_factor=math.inf,
+                  ir_max_steps=5, verbosity=0):
         if dim <= 0:
             raise ValueError("dim must be positive")
         if mem < 0:
@@ -47,8 +48,11 @@ cdef class AndersonAccelerator(object):
             raise ValueError("relaxation must be finite and in [0, 2]")
         if not math.isfinite(safeguard_factor) or safeguard_factor < 0:
             raise ValueError("safeguard_factor must be finite and non-negative")
-        if not math.isfinite(max_weight_norm) or max_weight_norm <= 0:
-            raise ValueError("max_weight_norm must be finite and positive")
+        # max_weight_norm and trust_factor: math.inf disables the cap.
+        if math.isnan(max_weight_norm) or max_weight_norm <= 0:
+            raise ValueError("max_weight_norm must be positive (inf for no cap)")
+        if math.isnan(trust_factor) or trust_factor <= 0:
+            raise ValueError("trust_factor must be positive (inf for off)")
         if ir_max_steps < 0:
             raise ValueError("ir_max_steps must be non-negative")
         # min_len: minimum # of residual pairs before AA starts extrapolating.
@@ -61,7 +65,7 @@ cdef class AndersonAccelerator(object):
             raise ValueError("min_len must be >= 1 when mem > 0")
         self._wrk = aa_init(dim, mem, min_len, type1, regularization,
                             relaxation, safeguard_factor, max_weight_norm,
-                            ir_max_steps, verbosity)
+                            trust_factor, ir_max_steps, verbosity)
         if self._wrk is NULL:
             raise MemoryError("aa_init failed")
         self._dim = dim
