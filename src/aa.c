@@ -230,12 +230,18 @@ static aa_float frob_from_col_norms(const aa_float *nrm_col, aa_int mem) {
  * fresh nrm2 over dim·mem entries. */
 static aa_float compute_regularization(AaWork *a) {
   TIME_TIC
+  /* Use ||S||_F · ||Y||_F symmetrically for both types. The original code
+   * used ||Y||² for type-II, which decays quadratically as Y → 0 and
+   * underflows to noise on slow-contraction maps (typical of ADMM/DRS
+   * applications). ||S||·||Y|| decays only linearly in ||Y||, which keeps
+   * the LS conditioned without changing well-behaved cases where ||S|| ≈
+   * ||Y||. Type-I already used this formula. */
   aa_float nrm_y = frob_from_col_norms(a->nrm_y_col, a->mem);
-  aa_float nrm_a = a->type1 ? frob_from_col_norms(a->nrm_s_col, a->mem) : nrm_y;
-  aa_float r = a->regularization * nrm_a * nrm_y;
+  aa_float nrm_s = frob_from_col_norms(a->nrm_s_col, a->mem);
+  aa_float r = a->regularization * nrm_s * nrm_y;
   if (a->verbosity > 2) {
-    printf("iter: %i, ||A||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
-           (int)a->iter, nrm_a, nrm_y, r);
+    printf("iter: %i, ||S||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
+           (int)a->iter, nrm_s, nrm_y, r);
   }
   TIME_TOC
   return r;
