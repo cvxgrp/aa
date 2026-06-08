@@ -78,7 +78,7 @@ jobs:
           Get-ChildItem $libFile.Directory.Parent.FullName | Format-Table Name
           "OPENBLAS_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - uses: pypa/cibuildwheel@v3.4.1
+      - uses: pypa/cibuildwheel@v4.0.0
         env:
           # setup.py reads OPENBLAS_ROOT at build time. cibuildwheel v3 no
           # longer substitutes `{env:...}` in repair commands, so we also
