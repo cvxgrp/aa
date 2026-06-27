@@ -50,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: egor-tensin/vs-shell@v2
 
       - uses: conda-incubator/setup-miniconda@v4
         with:
