@@ -132,6 +132,27 @@ struct ACCEL_WORK {
   aa_float safeguard_factor; /* safeguard tolerance factor */
   aa_float max_weight_norm;  /* maximum norm of AA weights */
 
+  /* Opt-in "trust region + adaptive regularization" mode. When trust_factor
+   * is a positive finite value, two coupled mechanisms turn on:
+   *   1. Trust region: each solve rejects the step if ||D γ||_2 > trust_factor
+   *      * ||g||_2. This catches the failure mode where γ passes the LS solve
+   *      and weight cap but the resulting iterate displacement is far larger
+   *      than the current residual — common on slow-contraction maps where the
+   *      LS basis points away from the descent direction.
+   *   2. Adaptive r: every safeguard or trust-region rejection grows
+   *      r_adaptive by 10×; every accept shrinks it by 0.9×. r_adaptive
+   *      *replaces* the ε·||S||·||Y|| baseline in compute_regularization.
+   *      Starting r_adaptive = 1.0 makes initial γ ≈ 0 (AA ≈ DRS) and the
+   *      shrink/grow feedback walks r to the right scale for the problem.
+   *      This is what keeps LASER-style problems converging even when the
+   *      trust region trips occasionally: each trip damps subsequent γ.
+   *
+   * trust_factor = INFINITY (the default for callers passing INFINITY)
+   * disables both mechanisms and the original ε·||S||·||Y|| regularization
+   * path is used unchanged. */
+  aa_float trust_factor;
+  aa_float r_adaptive;
+
   aa_float *x;     /* x input to map*/
   aa_float *f;     /* f(x) output of map */
   aa_float *g;     /* x - f(x) */
@@ -230,15 +251,46 @@ static aa_float frob_from_col_norms(const aa_float *nrm_col, aa_int mem) {
  * fresh nrm2 over dim·mem entries. */
 static aa_float compute_regularization(AaWork *a) {
   TIME_TIC
-  aa_float nrm_y = frob_from_col_norms(a->nrm_y_col, a->mem);
-  aa_float nrm_a = a->type1 ? frob_from_col_norms(a->nrm_s_col, a->mem) : nrm_y;
-  aa_float r = a->regularization * nrm_a * nrm_y;
-  if (a->verbosity > 2) {
-    printf("iter: %i, ||A||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
-           (int)a->iter, nrm_a, nrm_y, r);
+  aa_float r;
+  if (isfinite(a->trust_factor)) {
+    /* Trust-region mode: r is the adaptive value walked by the
+     * accept/reject feedback in aa_safeguard and solve(). The column-norm
+     * baseline is bypassed entirely — it underflows on slow-contraction
+     * maps, which is the whole reason we're here. */
+    r = a->r_adaptive;
+    if (a->verbosity > 2) {
+      printf("iter: %i, r_adaptive %.2e (trust mode)\n", (int)a->iter, r);
+    }
+  } else {
+    /* Default mode: ε · ||S||_F · ||Y||_F. Symmetric across types — the
+     * type-II side was ||Y||² before PR #53; ||S||_F · ||Y||_F keeps the
+     * LS conditioned without changing well-behaved cases where
+     * ||S|| ≈ ||Y||. */
+    aa_float nrm_y = frob_from_col_norms(a->nrm_y_col, a->mem);
+    aa_float nrm_s = frob_from_col_norms(a->nrm_s_col, a->mem);
+    r = a->regularization * nrm_s * nrm_y;
+    if (a->verbosity > 2) {
+      printf("iter: %i, ||S||_F %.2e, ||Y||_F %.2e, r: %.2e\n",
+             (int)a->iter, nrm_s, nrm_y, r);
+    }
   }
   TIME_TOC
   return r;
+}
+
+/* Helper: bump r_adaptive when AA produced a bad step. Called from every
+ * rejection path (in-solve and safeguard). */
+static void trust_grow(AaWork *a) {
+  if (!isfinite(a->trust_factor)) return;
+  a->r_adaptive *= 10.0;
+  if (a->r_adaptive > 1e30) a->r_adaptive = 1e30;
+}
+
+/* Helper: shrink r_adaptive when AA's step survived the safeguard. */
+static void trust_shrink(AaWork *a) {
+  if (!isfinite(a->trust_factor)) return;
+  a->r_adaptive *= 0.9;
+  if (a->r_adaptive < 1e-12) a->r_adaptive = 1e-12;
 }
 
 /* Build [M; √r I_len] column-major into `dst` with fixed leading dim
@@ -586,11 +638,34 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
     } else {
       a->n_reject_weight_cap++;
     }
+    trust_grow(a);  /* in-solve rejection bumps r toward damped-AA */
     a->success = 0;
     aa_reset(a);
     TIME_TOC
     if (!isfinite(aa_norm)) aa_norm = -1.0;
     return (aa_norm < 0) ? aa_norm : -aa_norm;
+  }
+
+  /* Trust region: only in trust mode. Compute ||D γ|| and reject if it
+   * exceeds trust_factor · ||g||. c_aug is dim+mem sized; γ has already
+   * been extracted into `gamma` (aliases a->work), and c_aug is rebuilt
+   * before being read again on the next iter — safe to scratch here. */
+  if (isfinite(a->trust_factor)) {
+    aa_float zerof = 0.0;
+    aa_float d_gamma_norm;
+    BLAS(gemv)
+    ("NoTrans", &bdim, &blen, &onef, a->D, &bdim, gamma, &one, &zerof,
+     a->c_aug, &one);
+    d_gamma_norm = BLAS(nrm2)(&bdim, a->c_aug, &one);
+    if (isfinite(d_gamma_norm) &&
+        d_gamma_norm > a->trust_factor * a->norm_g) {
+      a->n_reject_weight_cap++;
+      trust_grow(a);
+      a->success = 0;
+      aa_reset(a);
+      TIME_TOC
+      return -aa_norm;
+    }
   }
 
   /* f -= D γ */
@@ -613,13 +688,16 @@ static aa_float solve(aa_float *f, AaWork *a, aa_int len) {
 AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
                 aa_float regularization, aa_float relaxation,
                 aa_float safeguard_factor, aa_float max_weight_norm,
-                aa_int ir_max_steps, aa_int verbosity) {
+                aa_float trust_factor, aa_int ir_max_steps,
+                aa_int verbosity) {
   TIME_TIC
   AaWork *a;
   aa_int mem_clamped = MIN(mem, dim);
   /* `regularization` is accepted with either sign: positive = scaled by
    * ||A||_F ||Y||_F; negative = pinned absolute |regularization|; zero = off.
    * Only NaN / non-finite values are rejected (via the !isfinite check).
+   * `max_weight_norm` and `trust_factor` accept INFINITY as the "no cap"
+   * sentinel — NaN and non-positive are rejected.
    * min_len < 1 is rejected when mem > 0; min_len > mem_clamped is
    * silently clamped down — same treatment the `mem` argument already
    * gets against `dim`, so callers can pass `min_len = mem` without
@@ -629,7 +707,8 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
       !isfinite(regularization) ||
       !isfinite(relaxation) || relaxation < 0 || relaxation > 2 ||
       !isfinite(safeguard_factor) || safeguard_factor < 0 ||
-      !isfinite(max_weight_norm) || max_weight_norm <= 0 ||
+      isnan(max_weight_norm) || max_weight_norm <= 0 ||
+      isnan(trust_factor) || trust_factor <= 0 ||
       ir_max_steps < 0 ||
       (mem_clamped > 0 && min_len < 1)) {
     printf("Invalid AA parameters.\n");
@@ -653,6 +732,12 @@ AaWork *aa_init(aa_int dim, aa_int mem, aa_int min_len, aa_int type1,
   a->relaxation = relaxation;
   a->safeguard_factor = safeguard_factor;
   a->max_weight_norm = max_weight_norm;
+  a->trust_factor = trust_factor;
+  /* Adaptive r initial value: start at 1.0 so γ ≈ 0 on the first solves
+   * (AA ≈ pure f-iteration). The shrink/grow feedback walks r toward
+   * whatever scale this particular problem needs. Only meaningful when
+   * trust_factor is finite. */
+  a->r_adaptive = 1.0;
   a->ir_max_steps = ir_max_steps;
   a->success = 0;
   a->verbosity = verbosity;
@@ -850,10 +935,12 @@ aa_int aa_safeguard(aa_float *f_new, aa_float *x_new, AaWork *a) {
              (int)a->iter, norm_diff, a->norm_g);
     }
     a->n_safeguard_reject++;
+    trust_grow(a);  /* bad step → damp AA next time */
     aa_reset(a);
     TIME_TOC
     return -1;
   }
+  trust_shrink(a);  /* successful step → let AA do more next time */
   TIME_TOC
   return 0;
 }
