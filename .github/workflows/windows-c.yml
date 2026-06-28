@@ -27,7 +27,7 @@ jobs:
           "$root/bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: egor-tensin/vs-shell@v2
 
       - name: Build C Library
         shell: cmd
